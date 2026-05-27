@@ -34,30 +34,30 @@ def weight_init(module: nn.Module):
 
 
 # ──────────────────────────────────────────────────────────────
-#  Backbone: ResNet-50 from torchvision
+#  Backbone: ResNet-18 from torchvision (assignment-required backbone)
 # ──────────────────────────────────────────────────────────────
-class ResNet50Backbone(nn.Module):
+class ResNet18Backbone(nn.Module):
     """
-    Extract multi-level features from a pretrained ResNet-50.
+    Extract multi-level features from a pretrained ResNet-18.
     Returns features from layer1 ~ layer4 (stage 2 ~ stage 5 in the paper).
-    Channels: 256, 512, 1024, 2048
-    Strides:  4,   8,   16,   32
+    Channels: 64, 128, 256, 512
+    Strides:  4,  8,   16,  32
     """
 
     def __init__(self, pretrained: bool = True):
         super().__init__()
-        resnet = models.resnet50(
-            weights=models.ResNet50_Weights.DEFAULT if pretrained else None
+        resnet = models.resnet18(
+            weights=models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
         )
         # stage 1: conv1 + bn1 + relu + maxpool
         self.stem = nn.Sequential(
             resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool
         )
         # stages 2-5
-        self.layer1 = resnet.layer1   # -> 256  channels, stride 4
-        self.layer2 = resnet.layer2   # -> 512  channels, stride 8
-        self.layer3 = resnet.layer3   # -> 1024 channels, stride 16
-        self.layer4 = resnet.layer4   # -> 2048 channels, stride 32
+        self.layer1 = resnet.layer1   # ->  64 channels, stride 4
+        self.layer2 = resnet.layer2   # -> 128 channels, stride 8
+        self.layer3 = resnet.layer3   # -> 256 channels, stride 16
+        self.layer4 = resnet.layer4   # -> 512 channels, stride 32
 
     def forward(self, x: torch.Tensor):
         x = self.stem(x)
@@ -189,14 +189,14 @@ class F3Net(nn.Module):
     def __init__(self, channels: int = 64, pretrained: bool = True):
         super().__init__()
 
-        # Backbone
-        self.backbone = ResNet50Backbone(pretrained=pretrained)
+        # Backbone (ResNet-18 per assignment requirement)
+        self.backbone = ResNet18Backbone(pretrained=pretrained)
 
         # Channel squeeze: reduce backbone channels to uniform `channels`
-        self.squeeze2 = nn.Sequential(nn.Conv2d(256,  channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
-        self.squeeze3 = nn.Sequential(nn.Conv2d(512,  channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
-        self.squeeze4 = nn.Sequential(nn.Conv2d(1024, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
-        self.squeeze5 = nn.Sequential(nn.Conv2d(2048, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
+        self.squeeze2 = nn.Sequential(nn.Conv2d( 64, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
+        self.squeeze3 = nn.Sequential(nn.Conv2d(128, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
+        self.squeeze4 = nn.Sequential(nn.Conv2d(256, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
+        self.squeeze5 = nn.Sequential(nn.Conv2d(512, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
 
         # Two cascaded feedback decoders (N=2 is optimal per ablation)
         self.decoder1 = SubDecoder(channels)

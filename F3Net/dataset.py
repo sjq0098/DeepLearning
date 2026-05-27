@@ -48,9 +48,10 @@ class SODDataset(Dataset):
 
     def __getitem__(self, idx):
         name = self.samples[idx]
-        # Load image (BGR -> RGB) and mask
-        image = cv2.imread(os.path.join(self.datapath, "image", name + ".jpg"))
-        image = image[:, :, ::-1].astype(np.float32)  # BGR -> RGB
+        # Load image (keep BGR — MEAN/STD are in BGR order, matching the
+        # original F3Net implementation; converting to RGB here would mis-align
+        # per-channel normalization).
+        image = cv2.imread(os.path.join(self.datapath, "image", name + ".jpg")).astype(np.float32)
         mask = cv2.imread(os.path.join(self.datapath, "mask", name + ".png"), 0).astype(np.float32)
 
         # Normalize
