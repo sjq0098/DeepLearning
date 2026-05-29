@@ -25,13 +25,14 @@ class SODDataset(Dataset):
     """
     Salient Object Detection dataset.
 
-    Expected directory structure:
+    Expected directory structure (matches the assignment ECSSD layout):
         datapath/
-            image/     *.jpg
-            mask/      *.png
+            images/              *.jpg
+            ground_truth_mask/   *.png
             train.txt  (or test.txt)
 
     Each line in the txt file is a filename stem (no extension).
+    Run prepare_split.py to generate train.txt / test.txt.
     """
 
     def __init__(self, datapath: str, mode: str = "train", size: int = 352):
@@ -51,8 +52,8 @@ class SODDataset(Dataset):
         # Load image (keep BGR — MEAN/STD are in BGR order, matching the
         # original F3Net implementation; converting to RGB here would mis-align
         # per-channel normalization).
-        image = cv2.imread(os.path.join(self.datapath, "image", name + ".jpg")).astype(np.float32)
-        mask = cv2.imread(os.path.join(self.datapath, "mask", name + ".png"), 0).astype(np.float32)
+        image = cv2.imread(os.path.join(self.datapath, "images", name + ".jpg")).astype(np.float32)
+        mask = cv2.imread(os.path.join(self.datapath, "ground_truth_mask", name + ".png"), 0).astype(np.float32)
 
         # Normalize
         image = (image - MEAN) / STD
@@ -63,11 +64,15 @@ class SODDataset(Dataset):
             image, mask = self._random_flip(image, mask)
             return image, mask  # numpy arrays; collate_fn handles resize + tensor
         else:
-            image = cv2.resize(image, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
-            mask = cv2.resize(mask, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
-            image = torch.from_numpy(image.copy()).permute(2, 0, 1).float()
-            mask = torch.from_numpy(mask.copy()).float()
-            return image, mask, mask.shape, name
+            # Keep the ground-truth mask at its native resolution so the
+            # evaluator can compare against the un-resampled labels. The
+            # model still takes a fixed-size input but its prediction will
+            # be bilinearly upsampled back to `orig_shape` in test.py.
+            orig_shape = (mask.shape[0], mask.shape[1])  # (H, W) of original
+            image_resized = cv2.resize(image, (self.size, self.size), interpolation=cv2.INTER_LINEAR)
+            image_resized = torch.from_numpy(image_resized.copy()).permute(2, 0, 1).float()
+            mask_orig = torch.from_numpy(mask.copy()).float()  # (H, W), native size
+            return image_resized, mask_orig, orig_shape, name
 
     @staticmethod
     def _random_crop(image, mask):

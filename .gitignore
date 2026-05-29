@@ -3,3 +3,20 @@ F3Net/开放性题目-2026.pptx
 exp1/第一次实验报告-卷积神经网络.docx
 exp1/实践4-卷积神经网络作业.pptx
 F3Net/f3net.pdf
+F3Net/F³Net.pdf
+
+# F3Net training artifacts — never commit
+F3Net/data/
+F3Net/checkpoints/
+F3Net/results/
+F3Net/runs/
+*.pth
+
+# Python build cache
+**/__pycache__/
+*.pyc
+F3Net/checkpoints_ablation/A1/events.out.tfevents.1779980193.SJQ.30244.0
+F3Net/checkpoints_ablation/A2/events.out.tfevents.1779982422.SJQ.62840.0
+F3Net/checkpoints_ablation/A3/events.out.tfevents.1779985229.SJQ.22188.0
+F3Net/checkpoints_ablation/A4/events.out.tfevents.1779988037.SJQ.51076.0
+F3Net/checkpoints_ablation/A45/events.out.tfevents.1780028321.SJQ.67992.0

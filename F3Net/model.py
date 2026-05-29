@@ -1,11 +1,22 @@
 """
 F3Net: Fusion, Feedback and Focus for Salient Object Detection
-Modern PyTorch (2.0+) reimplementation.
+Modern PyTorch (2.0+) reimplementation, with ablation hooks.
 
-Key components:
-  - CFM  (Cross Feature Module):  element-wise multiplication based selective fusion
-  - CFD  (Cascaded Feedback Decoder): multi-stage feedback refinement
-  - PPA  (Pixel Position Aware Loss): structure-aware weighted BCE + wIoU
+Architecture is configurable via three flags so we can run the paper's
+Table 2 progression as a series of experiments:
+  - use_cfm       : True  -> CrossFeatureModule (multiplicative fusion)
+                    False -> AdditiveFusion     (same depth, '+' instead of '*')
+  - num_decoders  : 1     -> single sub-decoder, no feedback
+                    2     -> cascaded feedback decoder (paper's CFD)
+  - use_mls       : True  -> multi-level auxiliary supervision (4 extra heads)
+                    False -> only the final sub-decoder is supervised
+
+Default flags reproduce the full F3Net used in the baseline.
+
+Loss is selected at training time via `make_loss(name, gamma)`:
+  - 'bce' : plain binary cross entropy
+  - 'iou' : 1 - (inter + 1) / (union - inter + 1)
+  - 'ppa' : pixel-position-aware weighted (BCE + IoU)   [paper's main loss]
 """
 
 import torch
@@ -103,13 +114,6 @@ class CrossFeatureModule(nn.Module):
         weight_init(self)
 
     def forward(self, fl: torch.Tensor, fh: torch.Tensor):
-        """
-        Args:
-            fl: low-level features  (B, C, H, W)
-            fh: high-level features (B, C, H', W')  — will be upsampled to fl's size
-        Returns:
-            fl_refined, fh_refined: both at fl's spatial resolution
-        """
         if fh.shape[2:] != fl.shape[2:]:
             fh = F.interpolate(fh, size=fl.shape[2:], mode="bilinear", align_corners=False)
 
@@ -123,11 +127,50 @@ class CrossFeatureModule(nn.Module):
         cross = h2 * v2
 
         # Refine each branch: consensus + skip connection
-        h3 = self.conv3h(cross) + h1   # residual from first transform
+        h3 = self.conv3h(cross) + h1
         h4 = self.conv4h(h3)
         v3 = self.conv3v(cross) + v1
         v4 = self.conv4v(v3)
 
+        return h4, v4
+
+
+# ──────────────────────────────────────────────────────────────
+#  Additive Fusion (ablation alternative to CFM)
+# ──────────────────────────────────────────────────────────────
+class AdditiveFusion(nn.Module):
+    """
+    Drop-in replacement for CFM that fuses via element-wise *addition*
+    instead of multiplication. Same depth and channel count as CFM, so
+    the only architectural change is `+` vs `*`. Used for the "± CFM"
+    ablation row in the report.
+    """
+
+    def __init__(self, channels: int = 64):
+        super().__init__()
+        C = channels
+        self.conv1h = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv2h = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv3h = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv4h = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv1v = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv2v = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv3v = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        self.conv4v = nn.Sequential(nn.Conv2d(C, C, 3, padding=1), nn.BatchNorm2d(C), nn.ReLU(True))
+        weight_init(self)
+
+    def forward(self, fl: torch.Tensor, fh: torch.Tensor):
+        if fh.shape[2:] != fl.shape[2:]:
+            fh = F.interpolate(fh, size=fl.shape[2:], mode="bilinear", align_corners=False)
+        h1 = self.conv1h(fl)
+        h2 = self.conv2h(h1)
+        v1 = self.conv1v(fh)
+        v2 = self.conv2v(v1)
+        fused = h2 + v2                       # ← only diff vs CFM
+        h3 = self.conv3h(fused) + h1
+        h4 = self.conv4h(h3)
+        v3 = self.conv3v(fused) + v1
+        v4 = self.conv4v(v3)
         return h4, v4
 
 
@@ -138,214 +181,244 @@ class SubDecoder(nn.Module):
     """
     One stage of the Cascaded Feedback Decoder.
 
-    Bottom-up: aggregate features from stage5 -> stage2 via CFM.
+    Bottom-up: aggregate features from stage5 -> stage2 via fusion module.
     Optionally accepts `feedback` from the previous decoder stage.
     """
 
-    def __init__(self, channels: int = 64):
+    def __init__(self, channels: int = 64, use_cfm: bool = True):
         super().__init__()
-        self.cfm45 = CrossFeatureModule(channels)
-        self.cfm34 = CrossFeatureModule(channels)
-        self.cfm23 = CrossFeatureModule(channels)
+        Fusion = CrossFeatureModule if use_cfm else AdditiveFusion
+        # Names kept as `cfm*` for backward compatibility with the existing
+        # baseline checkpoints (decoder1.cfm45.* etc.).
+        self.cfm45 = Fusion(channels)
+        self.cfm34 = Fusion(channels)
+        self.cfm23 = Fusion(channels)
         weight_init(self)
 
     def forward(self, f2, f3, f4, f5, feedback=None):
-        """
-        Args:
-            f2..f5: multi-level features (B, C, Hi, Wi), resolution decreasing
-            feedback: aggregated prediction from previous decoder (B, C, H2, W2) or None
-        Returns:
-            f2, f3, f4, f5: refined multi-level features
-            pred: prediction features at f2's resolution
-        """
         if feedback is not None:
-            # Feedback: downsample aggregated features to each level's resolution
             f5 = f5 + F.interpolate(feedback, size=f5.shape[2:], mode="bilinear", align_corners=False)
             f4 = f4 + F.interpolate(feedback, size=f4.shape[2:], mode="bilinear", align_corners=False)
             f3 = f3 + F.interpolate(feedback, size=f3.shape[2:], mode="bilinear", align_corners=False)
             f2 = f2 + F.interpolate(feedback, size=f2.shape[2:], mode="bilinear", align_corners=False)
 
-        # Bottom-up aggregation: high -> low
-        f4, f4v = self.cfm45(f4, f5)   # fuse stage4 with stage5
-        f3, f3v = self.cfm34(f3, f4v)  # fuse stage3 with fused-4
-        f2, pred = self.cfm23(f2, f3v) # fuse stage2 with fused-3
-
+        f4, f4v = self.cfm45(f4, f5)
+        f3, f3v = self.cfm34(f3, f4v)
+        f2, pred = self.cfm23(f2, f3v)
         return f2, f3, f4, f5, pred
 
 
 # ──────────────────────────────────────────────────────────────
-#  F3Net: Full Model
+#  F3Net: Full Model (with ablation flags)
 # ──────────────────────────────────────────────────────────────
 class F3Net(nn.Module):
     """
-    F3Net = ResNet-50 encoder + channel squeeze + 2 cascaded feedback decoders.
+    F3Net = ResNet-18 encoder + channel squeeze + N cascaded decoders.
 
-    During training, returns 6 predictions for multi-level supervision:
-      pred1, pred2 (decoder outputs) + out2r, out3r, out4r, out5r (auxiliary)
+    With default flags this is the full architecture matching the paper
+    (R18 backbone substituted per assignment requirement).
+    The flags `use_cfm`, `num_decoders`, `use_mls` enable the ablation
+    progression: 'Bone -> +MLS -> +CFM -> +CFD -> +better loss'.
 
-    During inference (eval mode), returns only pred2 (the final refined prediction).
+    Training output (a tuple) layout:
+       (pred_1, ..., pred_N,  out2r, out3r, out4r, out5r)  if use_mls
+       (pred_1, ..., pred_N)                                otherwise
     """
 
-    def __init__(self, channels: int = 64, pretrained: bool = True):
+    def __init__(
+        self,
+        channels: int = 64,
+        pretrained: bool = True,
+        use_cfm: bool = True,
+        num_decoders: int = 2,
+        use_mls: bool = True,
+    ):
         super().__init__()
+        assert num_decoders in (1, 2), "num_decoders must be 1 or 2"
+        self.use_cfm = use_cfm
+        self.num_decoders = num_decoders
+        self.use_mls = use_mls
 
-        # Backbone (ResNet-18 per assignment requirement)
+        # Backbone
         self.backbone = ResNet18Backbone(pretrained=pretrained)
 
-        # Channel squeeze: reduce backbone channels to uniform `channels`
+        # Channel squeeze
         self.squeeze2 = nn.Sequential(nn.Conv2d( 64, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
         self.squeeze3 = nn.Sequential(nn.Conv2d(128, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
         self.squeeze4 = nn.Sequential(nn.Conv2d(256, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
         self.squeeze5 = nn.Sequential(nn.Conv2d(512, channels, 1), nn.BatchNorm2d(channels), nn.ReLU(True))
 
-        # Two cascaded feedback decoders (N=2 is optimal per ablation)
-        self.decoder1 = SubDecoder(channels)
-        self.decoder2 = SubDecoder(channels)
-
-        # Prediction heads
+        # Sub-decoders
+        self.decoder1 = SubDecoder(channels, use_cfm=use_cfm)
         self.head_p1 = nn.Conv2d(channels, 1, 3, padding=1)
-        self.head_p2 = nn.Conv2d(channels, 1, 3, padding=1)
+        if num_decoders >= 2:
+            self.decoder2 = SubDecoder(channels, use_cfm=use_cfm)
+            self.head_p2 = nn.Conv2d(channels, 1, 3, padding=1)
 
-        # Auxiliary heads for multi-level supervision
-        self.head_r2 = nn.Conv2d(channels, 1, 3, padding=1)
-        self.head_r3 = nn.Conv2d(channels, 1, 3, padding=1)
-        self.head_r4 = nn.Conv2d(channels, 1, 3, padding=1)
-        self.head_r5 = nn.Conv2d(channels, 1, 3, padding=1)
+        # Multi-level supervision aux heads
+        if use_mls:
+            self.head_r2 = nn.Conv2d(channels, 1, 3, padding=1)
+            self.head_r3 = nn.Conv2d(channels, 1, 3, padding=1)
+            self.head_r4 = nn.Conv2d(channels, 1, 3, padding=1)
+            self.head_r5 = nn.Conv2d(channels, 1, 3, padding=1)
 
-        # Initialize decoder + heads (backbone is pretrained)
+        # Initialize freshly-created layers (backbone is pretrained)
         weight_init(self.squeeze2)
         weight_init(self.squeeze3)
         weight_init(self.squeeze4)
         weight_init(self.squeeze5)
         weight_init(self.head_p1)
-        weight_init(self.head_p2)
-        weight_init(self.head_r2)
-        weight_init(self.head_r3)
-        weight_init(self.head_r4)
-        weight_init(self.head_r5)
+        if num_decoders >= 2:
+            weight_init(self.head_p2)
+        if use_mls:
+            weight_init(self.head_r2)
+            weight_init(self.head_r3)
+            weight_init(self.head_r4)
+            weight_init(self.head_r5)
 
     def forward(self, x: torch.Tensor, out_size=None):
-        """
-        Args:
-            x: input image (B, 3, H, W)
-            out_size: output spatial size, defaults to input size
-        Returns:
-            Training:  (pred1, pred2, out2r, out3r, out4r, out5r) — all (B,1,H,W) logits
-            Inference: pred2 — (B, 1, H, W) logits
-        """
         size = x.shape[2:] if out_size is None else out_size
 
-        # Encoder
+        # Encoder + squeeze
         c2, c3, c4, c5 = self.backbone(x)
         f2 = self.squeeze2(c2)
         f3 = self.squeeze3(c3)
         f4 = self.squeeze4(c4)
         f5 = self.squeeze5(c5)
 
-        # Decoder 1 (no feedback)
+        # Decoder cascade
         f2, f3, f4, f5, pred1_feat = self.decoder1(f2, f3, f4, f5)
-
-        # Decoder 2 (with feedback from decoder 1)
-        f2, f3, f4, f5, pred2_feat = self.decoder2(f2, f3, f4, f5, pred1_feat)
-
-        # Upsample predictions to output size
         pred1 = F.interpolate(self.head_p1(pred1_feat), size=size, mode="bilinear", align_corners=False)
-        pred2 = F.interpolate(self.head_p2(pred2_feat), size=size, mode="bilinear", align_corners=False)
+        preds = [pred1]
+
+        if self.num_decoders >= 2:
+            f2, f3, f4, f5, pred2_feat = self.decoder2(f2, f3, f4, f5, pred1_feat)
+            pred2 = F.interpolate(self.head_p2(pred2_feat), size=size, mode="bilinear", align_corners=False)
+            preds.append(pred2)
 
         if self.training:
-            # Auxiliary outputs for multi-level supervision
-            out2r = F.interpolate(self.head_r2(f2), size=size, mode="bilinear", align_corners=False)
-            out3r = F.interpolate(self.head_r3(f3), size=size, mode="bilinear", align_corners=False)
-            out4r = F.interpolate(self.head_r4(f4), size=size, mode="bilinear", align_corners=False)
-            out5r = F.interpolate(self.head_r5(f5), size=size, mode="bilinear", align_corners=False)
-            return pred1, pred2, out2r, out3r, out4r, out5r
-        else:
-            return pred2
+            if self.use_mls:
+                aux = (
+                    F.interpolate(self.head_r2(f2), size=size, mode="bilinear", align_corners=False),
+                    F.interpolate(self.head_r3(f3), size=size, mode="bilinear", align_corners=False),
+                    F.interpolate(self.head_r4(f4), size=size, mode="bilinear", align_corners=False),
+                    F.interpolate(self.head_r5(f5), size=size, mode="bilinear", align_corners=False),
+                )
+                return tuple(preds) + aux
+            return tuple(preds)
+
+        return preds[-1]   # inference: final (refined) prediction
 
 
 # ──────────────────────────────────────────────────────────────
-#  Pixel Position Aware Loss (PPA)
+#  Loss functions
 # ──────────────────────────────────────────────────────────────
+def bce_loss(pred: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    return F.binary_cross_entropy_with_logits(pred, mask)
+
+
+def iou_loss(pred: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """Plain (un-weighted) IoU loss on the sigmoid'd prediction."""
+    pred_sig = torch.sigmoid(pred)
+    inter = (pred_sig * mask).sum(dim=(2, 3))
+    union = (pred_sig + mask).sum(dim=(2, 3))
+    return (1.0 - (inter + 1) / (union - inter + 1)).mean()
+
+
 def ppa_loss(pred: torch.Tensor, mask: torch.Tensor, gamma: float = 5.0, kernel_size: int = 31):
     """
-    Pixel Position Aware Loss = wBCE + wIoU
-
-    Each pixel gets weight (1 + gamma * alpha), where:
-        alpha(i,j) = |avg_pool(gt, neighborhood) - gt(i,j)|
-
-    Pixels at boundaries / thin structures / holes get higher alpha.
-
-    Args:
-        pred: logits (B, 1, H, W) — NOT sigmoid'd
-        mask: ground truth (B, 1, H, W) in [0, 1]
-        gamma: controls hard-pixel emphasis (paper uses 5)
-        kernel_size: neighborhood size for computing alpha (paper uses 31)
+    Pixel Position Aware Loss = wBCE + wIoU.
+    weight = 1 + gamma * |avg_pool(gt, k) - gt|  (boundaries get larger weight)
     """
     padding = kernel_size // 2
-
-    # Compute per-pixel weight alpha = |local_mean(gt) - gt|
-    # alpha is high at boundaries/thin structures, low at flat regions
     local_mean = F.avg_pool2d(mask, kernel_size=kernel_size, stride=1, padding=padding)
     alpha = (local_mean - mask).abs()
-    weight = 1.0 + gamma * alpha  # (B, 1, H, W)
+    weight = 1.0 + gamma * alpha
 
-    # ── Weighted BCE ──
     wbce = F.binary_cross_entropy_with_logits(pred, mask, reduction="none")
     wbce = (weight * wbce).sum(dim=(2, 3)) / weight.sum(dim=(2, 3))
 
-    # ── Weighted IoU ──
     pred_sig = torch.sigmoid(pred)
     inter = (pred_sig * mask * weight).sum(dim=(2, 3))
     union = ((pred_sig + mask) * weight).sum(dim=(2, 3))
-    wiou = 1.0 - (inter + 1) / (union - inter + 1)  # +1 for numerical stability
+    wiou = 1.0 - (inter + 1) / (union - inter + 1)
 
     return (wbce + wiou).mean()
 
 
-def total_loss(outputs, mask, gamma: float = 5.0):
+def make_loss(name: str, gamma: float = 5.0):
     """
-    Compute the full F3Net loss with multi-level supervision.
-
-    Loss = (L_pred1 + L_pred2) / 2
-         + L_out2r / 2 + L_out3r / 4 + L_out4r / 8 + L_out5r / 16
+    Returns a callable `(pred, mask) -> tensor`. Used by train.py to pick
+    the per-prediction loss for an ablation.
     """
-    pred1, pred2, out2r, out3r, out4r, out5r = outputs
+    name = name.lower()
+    if name == "bce":
+        return bce_loss
+    if name == "iou":
+        return iou_loss
+    if name == "ppa":
+        return lambda pred, mask: ppa_loss(pred, mask, gamma=gamma)
+    raise ValueError(f"Unknown loss: {name!r} (expected bce/iou/ppa)")
 
-    loss_p1 = ppa_loss(pred1, mask, gamma)
-    loss_p2 = ppa_loss(pred2, mask, gamma)
-    loss_r2 = ppa_loss(out2r, mask, gamma)
-    loss_r3 = ppa_loss(out3r, mask, gamma)
-    loss_r4 = ppa_loss(out4r, mask, gamma)
-    loss_r5 = ppa_loss(out5r, mask, gamma)
 
-    return (loss_p1 + loss_p2) / 2 + loss_r2 / 2 + loss_r3 / 4 + loss_r4 / 8 + loss_r5 / 16
+def total_loss(outputs, mask, loss_fn=None, gamma: float = 5.0,
+               num_decoders: int = 2, use_mls: bool = True):
+    """
+    Aggregate the per-head losses.
+
+    If `loss_fn` is None, defaults to PPA(gamma) (paper setting). Pass a
+    callable returned by make_loss() to swap in BCE or IoU for ablations.
+
+    Total = mean(pred-head losses)
+          + (1/2 * L_r2 + 1/4 * L_r3 + 1/8 * L_r4 + 1/16 * L_r5)  if use_mls
+    """
+    if loss_fn is None:
+        loss_fn = lambda p, m: ppa_loss(p, m, gamma=gamma)
+
+    # Predictions from sub-decoders
+    pred_losses = [loss_fn(outputs[i], mask) for i in range(num_decoders)]
+    main = sum(pred_losses) / len(pred_losses)
+
+    if not use_mls:
+        return main
+
+    # Auxiliary multi-level supervision heads (4 of them: r2, r3, r4, r5)
+    aux = outputs[num_decoders:]
+    assert len(aux) == 4, f"expected 4 aux heads with use_mls=True, got {len(aux)}"
+    aux_weights = (1 / 2, 1 / 4, 1 / 8, 1 / 16)
+    aux_total = sum(loss_fn(a, mask) * w for a, w in zip(aux, aux_weights))
+    return main + aux_total
 
 
 # ──────────────────────────────────────────────────────────────
-#  Quick sanity check
+#  Quick sanity check (covers all 5 ablation variants)
 # ──────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = F3Net(pretrained=False).to(device)
 
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Total params:     {total_params / 1e6:.2f}M")
-    print(f"Trainable params: {trainable / 1e6:.2f}M")
+    variants = [
+        ("A1 bone (no CFM, N=1, no MLS, BCE)", dict(use_cfm=False, num_decoders=1, use_mls=False), "bce"),
+        ("A2 +MLS                          ", dict(use_cfm=False, num_decoders=1, use_mls=True),  "bce"),
+        ("A3 +CFM                          ", dict(use_cfm=True,  num_decoders=1, use_mls=True),  "bce"),
+        ("A4 +CFD                          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "bce"),
+        ("A5 +PPA (full baseline)          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "ppa"),
+    ]
 
-    # Forward pass test
     x = torch.randn(2, 3, 352, 352).to(device)
     mask = torch.rand(2, 1, 352, 352).to(device)
 
-    model.train()
-    outputs = model(x)
-    loss = total_loss(outputs, mask)
-    print(f"Training output shapes: {[o.shape for o in outputs]}")
-    print(f"Loss: {loss.item():.4f}")
-
-    model.eval()
-    with torch.no_grad():
-        pred = model(x)
-    print(f"Inference output shape: {pred.shape}")
-    print("✓ All checks passed!")
+    for name, kwargs, loss_name in variants:
+        model = F3Net(pretrained=False, **kwargs).to(device)
+        total_params = sum(p.numel() for p in model.parameters()) / 1e6
+        loss_fn = make_loss(loss_name)
+        model.train()
+        outputs = model(x)
+        loss = total_loss(outputs, mask, loss_fn=loss_fn,
+                          num_decoders=kwargs["num_decoders"],
+                          use_mls=kwargs["use_mls"])
+        model.eval()
+        with torch.no_grad():
+            pred = model(x)
+        print(f"{name} | params {total_params:5.2f}M | n_train_outputs {len(outputs)} | "
+              f"loss {loss.item():.3f} | infer_shape {tuple(pred.shape)}")
+    print("✓ All variants OK")
