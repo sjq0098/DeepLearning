@@ -20,6 +20,7 @@ import os
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 from dataset import get_test_loader
@@ -77,6 +78,79 @@ def per_image_metrics(pred: np.ndarray, gt: np.ndarray, n_bins: int = 256, beta2
     return mae, f_curve.astype(np.float32), float(f_adapt)
 
 
+def boundary_metrics(pred: np.ndarray, gt: np.ndarray, dilate_width: int = 5, beta2: float = 0.3):
+    """
+    Boundary-band quality metrics, used to *quantify* edge sharpness (§7.1) and
+    to validate the edge-sharpening improvements (boundary loss / BAS / A8).
+
+    The "band" is the GT object contour dilated by `dilate_width` px. Metrics are
+    computed only inside this band, where ordinary MAE/F-measure are dominated by
+    the easy interior/background and cannot reveal boundary softness.
+
+    Returns (boundary_MAE, boundary_F) or None if the image has no boundary
+    (empty/full GT).
+
+        boundary_MAE : mean |pred - gt| inside the band   (lower = sharper)
+        boundary_F   : F-measure (beta^2=0.3) at threshold 0.5, restricted to band
+    """
+    gt_bin = (gt >= 0.5).astype(np.uint8)
+    s = int(gt_bin.sum())
+    if s == 0 or s == gt_bin.size:
+        return None
+
+    k3 = np.ones((3, 3), np.uint8)
+    edge = cv2.dilate(gt_bin, k3) - cv2.erode(gt_bin, k3)
+    band = cv2.dilate(edge, np.ones((dilate_width, dilate_width), np.uint8)) > 0
+    if not band.any():
+        return None
+
+    bmae = float(np.abs(pred - gt)[band].mean())
+
+    pb = pred >= 0.5
+    gtb = gt_bin.astype(bool)
+    tp = float((pb & gtb & band).sum())
+    pp = float((pb & band).sum())
+    pg = float((gtb & band).sum())
+    if pp > 0 and pg > 0 and tp > 0:
+        prec, rec = tp / pp, tp / pg
+        bf = (1 + beta2) * prec * rec / (beta2 * prec + rec + 1e-10)
+    else:
+        bf = 0.0
+    return bmae, float(bf)
+
+
+def predict_tta(model, image, out_size, scales=(1.0,), flip=False):
+    """
+    Test-time augmentation (④): average the sigmoid prediction over several input
+    scales and (optionally) a horizontal flip. Returns a (H, W) probability map.
+
+    `image` is the fixed-size model input (1, 3, S, S); each scale resizes it and
+    the logits are upsampled back to the native `out_size` before averaging, so
+    all augmented views are combined in the original image geometry.
+    """
+    H, W = out_size
+    acc = None
+    n = 0
+    for s in scales:
+        if abs(s - 1.0) < 1e-6:
+            inp = image
+        else:
+            sz = max(32, int(round(image.shape[-1] * s)))
+            inp = F.interpolate(image, size=(sz, sz), mode="bilinear", align_corners=False)
+        views = [inp]
+        flips = [False]
+        if flip:
+            views.append(torch.flip(inp, dims=[3]))
+            flips.append(True)
+        for v, is_flip in zip(views, flips):
+            prob = torch.sigmoid(model(v, out_size=(H, W)))
+            if is_flip:
+                prob = torch.flip(prob, dims=[3])
+            acc = prob if acc is None else acc + prob
+            n += 1
+    return (acc / n)[0, 0].cpu().numpy()
+
+
 @torch.no_grad()
 def evaluate(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,6 +162,7 @@ def evaluate(args):
         use_cfm=use_cfm,
         num_decoders=args.num_decoders,
         use_mls=use_mls,
+        use_bas=args.use_bas,
     ).to(device)
     state = torch.load(args.checkpoint, map_location=device, weights_only=True)
     model.load_state_dict(state)
@@ -105,18 +180,27 @@ def evaluate(args):
         print(f"Saving saliency maps to: {save_dir}")
 
     maes, f_curves, f_adapts = [], [], []
+    b_maes, b_fs = [], []
     for image, mask, shape, name in tqdm(loader, total=len(loader), ncols=80):
         image = image.to(device, non_blocking=True)
         H, W = int(shape[0].item()), int(shape[1].item())
 
-        pred = model(image, out_size=(H, W))                 # (1, 1, H, W) logits
-        pred = torch.sigmoid(pred[0, 0]).cpu().numpy()        # (H, W) in [0, 1]
+        if args.tta:
+            scales = tuple(float(s) for s in args.tta_scales.split(","))
+            pred = predict_tta(model, image, (H, W), scales=scales, flip=True)
+        else:
+            pred = torch.sigmoid(model(image, out_size=(H, W))[0, 0]).cpu().numpy()
         gt = mask[0].cpu().numpy()                            # (H, W) in [0, 1]
 
         mae, f_curve, f_adapt = per_image_metrics(pred, gt)
         maes.append(mae)
         f_curves.append(f_curve)
         f_adapts.append(f_adapt)
+
+        bm = boundary_metrics(pred, gt)
+        if bm is not None:
+            b_maes.append(bm[0])
+            b_fs.append(bm[1])
 
         if save_dir:
             cv2.imwrite(os.path.join(save_dir, name[0] + ".png"), (pred * 255).astype(np.uint8))
@@ -128,6 +212,9 @@ def evaluate(args):
     print(f"  F-measure (max)    : {f_curve_mean.max():.4f}")
     print(f"  F-measure (mean)   : {f_curve_mean.mean():.4f}")
     print(f"  F-measure (adapt)  : {np.mean(f_adapts):.4f}")
+    print(f"  --- boundary band (width=5, {len(b_maes)} imgs) ---")
+    print(f"  Boundary MAE       : {np.mean(b_maes):.4f}")
+    print(f"  Boundary F (0.5)   : {np.mean(b_fs):.4f}")
 
 
 def main():
@@ -141,6 +228,11 @@ def main():
     p.add_argument("--no_cfm", action="store_true", help="Checkpoint was trained with AdditiveFusion instead of CFM")
     p.add_argument("--num_decoders", type=int, default=2, choices=[1, 2], help="Number of sub-decoders the checkpoint was trained with")
     p.add_argument("--no_mls", action="store_true", help="Checkpoint was trained without multi-level supervision")
+    p.add_argument("--use_bas", action="store_true", help="Checkpoint was trained with the BAS boundary head (③)")
+    p.add_argument("--tta", action="store_true", help="④ multi-scale + hflip test-time augmentation")
+    p.add_argument("--tta_scales", type=str, default="0.82,0.91,1.0",
+                   help="Comma-separated input-scale multipliers for --tta. Keep <=1.0: the "
+                        "model was trained on {224..352}px, so upscaling past 352 is OOD and hurts.")
     args = p.parse_args()
     evaluate(args)
 

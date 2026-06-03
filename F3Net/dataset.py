@@ -35,12 +35,17 @@ class SODDataset(Dataset):
     Run prepare_split.py to generate train.txt / test.txt.
     """
 
-    def __init__(self, datapath: str, mode: str = "train", size: int = 352):
+    def __init__(self, datapath: str, mode: str = "train", size: int = 352, split: str = None):
+        # `mode` controls behaviour (train -> augment, test -> native-res GT).
+        # `split` controls which <name>.txt file to read; defaults to `mode`.
+        # This lets the data-scaling study (②) train on train_175.txt etc. while
+        # still using the full training augmentation pipeline.
         self.datapath = datapath
         self.mode = mode
         self.size = size
+        self.split = split or mode
 
-        txt_file = os.path.join(datapath, f"{mode}.txt")
+        txt_file = os.path.join(datapath, f"{self.split}.txt")
         with open(txt_file, "r") as f:
             self.samples = [line.strip() for line in f if line.strip()]
 
@@ -106,8 +111,8 @@ def train_collate_fn(batch):
     return images_t, masks_t
 
 
-def get_train_loader(datapath: str, batch_size: int = 32, num_workers: int = 4):
-    dataset = SODDataset(datapath, mode="train")
+def get_train_loader(datapath: str, batch_size: int = 32, num_workers: int = 4, split: str = "train"):
+    dataset = SODDataset(datapath, mode="train", split=split)
     return DataLoader(
         dataset,
         batch_size=batch_size,

@@ -30,20 +30,24 @@ def get_lr(epoch: int, max_epoch: int, base_lr: float) -> float:
 
 def train(args):
     # ── Data ──
-    loader = get_train_loader(args.datapath, batch_size=args.batch_size, num_workers=args.workers)
+    loader = get_train_loader(args.datapath, batch_size=args.batch_size, num_workers=args.workers, split=args.train_split)
     print(f"Dataset: {args.datapath}, {len(loader.dataset)} images, {len(loader)} batches/epoch")
 
     # ── Model ──
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     use_cfm = not args.no_cfm
     use_mls = not args.no_mls
+    use_bas = args.use_bas
     model = F3Net(
         pretrained=True,
         use_cfm=use_cfm,
         num_decoders=args.num_decoders,
         use_mls=use_mls,
+        use_bas=use_bas,
     ).to(device)
-    print(f"Model: use_cfm={use_cfm}, num_decoders={args.num_decoders}, use_mls={use_mls}, loss={args.loss}")
+    print(f"Model: use_cfm={use_cfm}, num_decoders={args.num_decoders}, use_mls={use_mls}, use_bas={use_bas}, loss={args.loss}")
+    print(f"Sharpening: boundary_w={args.boundary_weight}, ssim_w={args.ssim_weight}, "
+          f"edge_w={args.edge_weight}, bas_w={args.bas_weight}, k={args.boundary_kernel}")
 
     # Per-prediction loss function (BCE / IoU / PPA) — passed into total_loss
     loss_fn = make_loss(args.loss, gamma=args.gamma)
@@ -109,11 +113,21 @@ def train(args):
                     loss_fn=loss_fn,
                     num_decoders=args.num_decoders,
                     use_mls=use_mls,
+                    boundary_weight=args.boundary_weight,
+                    ssim_weight=args.ssim_weight,
+                    edge_weight=args.edge_weight,
+                    bas_weight=args.bas_weight,
+                    boundary_kernel=args.boundary_kernel,
+                    image=images,
+                    use_bas=use_bas,
                 )
 
             # Backward with gradient scaling
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
+            if args.grad_clip > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
             scaler.step(optimizer)
             scaler.update()
 
@@ -148,6 +162,8 @@ def train(args):
 def main():
     parser = argparse.ArgumentParser(description="F3Net Training")
     parser.add_argument("--datapath", type=str, default="./data/DUTS", help="Path to DUTS dataset")
+    parser.add_argument("--train_split", type=str, default="train",
+                        help="Name of the <split>.txt training list (for the ② data-scaling study, e.g. train_175)")
     parser.add_argument("--savepath", type=str, default="./checkpoints", help="Save directory")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--epochs", type=int, default=32)
@@ -169,6 +185,21 @@ def main():
                         help="Number of cascaded sub-decoders (1 = no feedback, 2 = paper's CFD)")
     parser.add_argument("--no_mls", action="store_true",
                         help="Disable multi-level auxiliary supervision")
+    # Edge-sharpening improvement flags (all 0 / off -> identical to baseline)
+    parser.add_argument("--boundary_weight", type=float, default=0.0,
+                        help="① weight for Boundary-IoU loss on the final prediction")
+    parser.add_argument("--ssim_weight", type=float, default=0.0,
+                        help="① weight for structural SSIM loss on the final prediction")
+    parser.add_argument("--edge_weight", type=float, default=0.0,
+                        help="A8 weight for salient-region-gated image-edge consistency loss")
+    parser.add_argument("--use_bas", action="store_true",
+                        help="③ add a boundary-aware auxiliary supervision head off f2")
+    parser.add_argument("--bas_weight", type=float, default=0.5,
+                        help="③ weight for the BAS head boundary BCE (only used with --use_bas)")
+    parser.add_argument("--boundary_kernel", type=int, default=3,
+                        help="Kernel size for morphological boundary extraction (① / ③ / A8)")
+    parser.add_argument("--grad_clip", type=float, default=0.0,
+                        help="Max grad-norm for clipping (0 = off). Safety net for the sharpening losses.")
     args = parser.parse_args()
     train(args)
 

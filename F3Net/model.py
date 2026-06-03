@@ -24,6 +24,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 
+from boundary import boundary_loss, ssim_loss, edge_consistency_loss, gt_boundary
+
 
 # ──────────────────────────────────────────────────────────────
 #  Weight Initialization
@@ -232,12 +234,14 @@ class F3Net(nn.Module):
         use_cfm: bool = True,
         num_decoders: int = 2,
         use_mls: bool = True,
+        use_bas: bool = False,
     ):
         super().__init__()
         assert num_decoders in (1, 2), "num_decoders must be 1 or 2"
         self.use_cfm = use_cfm
         self.num_decoders = num_decoders
         self.use_mls = use_mls
+        self.use_bas = use_bas
 
         # Backbone
         self.backbone = ResNet18Backbone(pretrained=pretrained)
@@ -262,6 +266,12 @@ class F3Net(nn.Module):
             self.head_r4 = nn.Conv2d(channels, 1, 3, padding=1)
             self.head_r5 = nn.Conv2d(channels, 1, 3, padding=1)
 
+        # ③ Boundary-Aware auxiliary Supervision head (sibling of the saliency
+        # head, off the final decoder feature). Training-only; predicts the
+        # object contour, supervised by the GT morphological-gradient boundary.
+        if use_bas:
+            self.head_boundary = nn.Conv2d(channels, 1, 3, padding=1)
+
         # Initialize freshly-created layers (backbone is pretrained)
         weight_init(self.squeeze2)
         weight_init(self.squeeze3)
@@ -275,6 +285,8 @@ class F3Net(nn.Module):
             weight_init(self.head_r3)
             weight_init(self.head_r4)
             weight_init(self.head_r5)
+        if use_bas:
+            weight_init(self.head_boundary)
 
     def forward(self, x: torch.Tensor, out_size=None):
         size = x.shape[2:] if out_size is None else out_size
@@ -290,22 +302,28 @@ class F3Net(nn.Module):
         f2, f3, f4, f5, pred1_feat = self.decoder1(f2, f3, f4, f5)
         pred1 = F.interpolate(self.head_p1(pred1_feat), size=size, mode="bilinear", align_corners=False)
         preds = [pred1]
+        final_feat = pred1_feat
 
         if self.num_decoders >= 2:
             f2, f3, f4, f5, pred2_feat = self.decoder2(f2, f3, f4, f5, pred1_feat)
             pred2 = F.interpolate(self.head_p2(pred2_feat), size=size, mode="bilinear", align_corners=False)
             preds.append(pred2)
+            final_feat = pred2_feat
 
         if self.training:
+            out = tuple(preds)
             if self.use_mls:
-                aux = (
+                out = out + (
                     F.interpolate(self.head_r2(f2), size=size, mode="bilinear", align_corners=False),
                     F.interpolate(self.head_r3(f3), size=size, mode="bilinear", align_corners=False),
                     F.interpolate(self.head_r4(f4), size=size, mode="bilinear", align_corners=False),
                     F.interpolate(self.head_r5(f5), size=size, mode="bilinear", align_corners=False),
                 )
-                return tuple(preds) + aux
-            return tuple(preds)
+            if self.use_bas:
+                # Boundary logit appended LAST (total_loss peels it off via use_bas).
+                bnd = F.interpolate(self.head_boundary(final_feat), size=size, mode="bilinear", align_corners=False)
+                out = out + (bnd,)
+            return out
 
         return preds[-1]   # inference: final (refined) prediction
 
@@ -330,8 +348,13 @@ def ppa_loss(pred: torch.Tensor, mask: torch.Tensor, gamma: float = 5.0, kernel_
     Pixel Position Aware Loss = wBCE + wIoU.
     weight = 1 + gamma * |avg_pool(gt, k) - gt|  (boundaries get larger weight)
     """
-    padding = kernel_size // 2
-    local_mean = F.avg_pool2d(mask, kernel_size=kernel_size, stride=1, padding=padding)
+    # Reflect-pad before pooling: avg_pool2d's own `padding` arg zero-pads and
+    # counts those zeros in the mean (count_include_pad=True), which artificially
+    # lowers local_mean at the image border -> spuriously inflates alpha there.
+    # Reflect padding removes that border artifact.
+    pad = kernel_size // 2
+    mask_p = F.pad(mask, (pad, pad, pad, pad), mode="reflect")
+    local_mean = F.avg_pool2d(mask_p, kernel_size=kernel_size, stride=1, padding=0)
     alpha = (local_mean - mask).abs()
     weight = 1.0 + gamma * alpha
 
@@ -362,32 +385,72 @@ def make_loss(name: str, gamma: float = 5.0):
 
 
 def total_loss(outputs, mask, loss_fn=None, gamma: float = 5.0,
-               num_decoders: int = 2, use_mls: bool = True):
+               num_decoders: int = 2, use_mls: bool = True,
+               boundary_weight: float = 0.0, ssim_weight: float = 0.0,
+               edge_weight: float = 0.0, bas_weight: float = 0.0,
+               boundary_kernel: int = 3, image=None, use_bas: bool = False):
     """
-    Aggregate the per-head losses.
+    Aggregate the per-head losses, plus optional edge-sharpening terms.
 
-    If `loss_fn` is None, defaults to PPA(gamma) (paper setting). Pass a
-    callable returned by make_loss() to swap in BCE or IoU for ablations.
+    Base (unchanged):
+        Total = mean(pred-head losses)
+              + (1/2 L_r2 + 1/4 L_r3 + 1/8 L_r4 + 1/16 L_r5)   if use_mls
 
-    Total = mean(pred-head losses)
-          + (1/2 * L_r2 + 1/4 * L_r3 + 1/8 * L_r4 + 1/16 * L_r5)  if use_mls
+    Optional sharpening terms (all default to 0 -> exactly the old behaviour),
+    applied to the *final* sub-decoder prediction:
+        + boundary_weight * boundary_loss   (①  Boundary-IoU)
+        + ssim_weight     * ssim_loss       (①  structural SSIM)
+        + edge_weight     * edge_consistency_loss(image)   (A8, needs `image`)
+        + bas_weight      * BCE(boundary_head, gt_boundary) (③, needs use_bas)
+
+    Output tuple layout expected (matches F3Net.forward):
+        (pred_1..pred_N, [out2r,out3r,out4r,out5r if mls], [bnd_logit if use_bas])
     """
     if loss_fn is None:
         loss_fn = lambda p, m: ppa_loss(p, m, gamma=gamma)
 
+    outputs = list(outputs)
+    boundary_logit = None
+    if use_bas:
+        boundary_logit = outputs[-1]          # BAS head is appended last
+        outputs = outputs[:-1]
+
     # Predictions from sub-decoders
     pred_losses = [loss_fn(outputs[i], mask) for i in range(num_decoders)]
-    main = sum(pred_losses) / len(pred_losses)
+    total = sum(pred_losses) / len(pred_losses)
 
-    if not use_mls:
-        return main
+    if use_mls:
+        aux = outputs[num_decoders:]
+        assert len(aux) == 4, f"expected 4 aux heads with use_mls=True, got {len(aux)}"
+        aux_weights = (1 / 2, 1 / 4, 1 / 8, 1 / 16)
+        total = total + sum(loss_fn(a, mask) * w for a, w in zip(aux, aux_weights))
 
-    # Auxiliary multi-level supervision heads (4 of them: r2, r3, r4, r5)
-    aux = outputs[num_decoders:]
-    assert len(aux) == 4, f"expected 4 aux heads with use_mls=True, got {len(aux)}"
-    aux_weights = (1 / 2, 1 / 4, 1 / 8, 1 / 16)
-    aux_total = sum(loss_fn(a, mask) * w for a, w in zip(aux, aux_weights))
-    return main + aux_total
+    # ── Edge-sharpening terms (applied to the final refined prediction) ──
+    # Computed with autocast DISABLED (forced fp32). SSIM's windowed variance
+    # terms are numerically fragile in fp16 — near-zero denominators produced a
+    # sudden NaN at ~epoch 6 in the first A7 run. A plain `.float()` inside the
+    # loss is not enough, because autocast re-casts conv2d back to fp16; only
+    # this context actually keeps the ops in fp32.
+    final_logit = outputs[num_decoders - 1]
+    need_sharpen = (boundary_weight > 0 or ssim_weight > 0
+                    or (edge_weight > 0 and image is not None)
+                    or (use_bas and bas_weight > 0))
+    if need_sharpen:
+        with torch.autocast(device_type=final_logit.device.type, enabled=False):
+            fl = final_logit.float()
+            m = mask.float()
+            if boundary_weight > 0:
+                total = total + boundary_weight * boundary_loss(fl, m, boundary_kernel)
+            if ssim_weight > 0:
+                total = total + ssim_weight * ssim_loss(fl, m)
+            if edge_weight > 0 and image is not None:
+                total = total + edge_weight * edge_consistency_loss(fl, image.float(), m, boundary_kernel)
+            if use_bas and bas_weight > 0:
+                total = total + bas_weight * F.binary_cross_entropy_with_logits(
+                    boundary_logit.float(), gt_boundary(m, boundary_kernel)
+                )
+
+    return total
 
 
 # ──────────────────────────────────────────────────────────────
@@ -396,18 +459,25 @@ def total_loss(outputs, mask, loss_fn=None, gamma: float = 5.0,
 if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
+    # (name, model kwargs, loss name, sharpening kwargs for total_loss)
     variants = [
-        ("A1 bone (no CFM, N=1, no MLS, BCE)", dict(use_cfm=False, num_decoders=1, use_mls=False), "bce"),
-        ("A2 +MLS                          ", dict(use_cfm=False, num_decoders=1, use_mls=True),  "bce"),
-        ("A3 +CFM                          ", dict(use_cfm=True,  num_decoders=1, use_mls=True),  "bce"),
-        ("A4 +CFD                          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "bce"),
-        ("A5 +PPA (full baseline)          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "ppa"),
+        ("A1 bone (no CFM, N=1, no MLS, BCE)", dict(use_cfm=False, num_decoders=1, use_mls=False), "bce", {}),
+        ("A2 +MLS                          ", dict(use_cfm=False, num_decoders=1, use_mls=True),  "bce", {}),
+        ("A3 +CFM                          ", dict(use_cfm=True,  num_decoders=1, use_mls=True),  "bce", {}),
+        ("A4 +CFD                          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "bce", {}),
+        ("A5 +PPA (full baseline)          ", dict(use_cfm=True,  num_decoders=2, use_mls=True),  "ppa", {}),
+        ("A6 +BAS head (③)                 ", dict(use_cfm=True,  num_decoders=2, use_mls=True, use_bas=True), "ppa",
+         dict(use_bas=True, bas_weight=0.5)),
+        ("A7 +boundary+ssim (①)            ", dict(use_cfm=True,  num_decoders=2, use_mls=True), "ppa",
+         dict(boundary_weight=1.0, ssim_weight=1.0)),
+        ("A8 +edge-consistency (A8)        ", dict(use_cfm=True,  num_decoders=2, use_mls=True), "ppa",
+         dict(edge_weight=1.0)),
     ]
 
     x = torch.randn(2, 3, 352, 352).to(device)
-    mask = torch.rand(2, 1, 352, 352).to(device)
+    mask = (torch.rand(2, 1, 352, 352) > 0.5).float().to(device)
 
-    for name, kwargs, loss_name in variants:
+    for name, kwargs, loss_name, extra in variants:
         model = F3Net(pretrained=False, **kwargs).to(device)
         total_params = sum(p.numel() for p in model.parameters()) / 1e6
         loss_fn = make_loss(loss_name)
@@ -415,10 +485,12 @@ if __name__ == "__main__":
         outputs = model(x)
         loss = total_loss(outputs, mask, loss_fn=loss_fn,
                           num_decoders=kwargs["num_decoders"],
-                          use_mls=kwargs["use_mls"])
+                          use_mls=kwargs["use_mls"],
+                          image=x, boundary_kernel=3, **extra)
+        loss.backward()
         model.eval()
         with torch.no_grad():
             pred = model(x)
         print(f"{name} | params {total_params:5.2f}M | n_train_outputs {len(outputs)} | "
               f"loss {loss.item():.3f} | infer_shape {tuple(pred.shape)}")
-    print("✓ All variants OK")
+    print("[OK] All variants OK")

@@ -20,3 +20,6 @@ F3Net/checkpoints_ablation/A2/events.out.tfevents.1779982422.SJQ.62840.0
 F3Net/checkpoints_ablation/A3/events.out.tfevents.1779985229.SJQ.22188.0
 F3Net/checkpoints_ablation/A4/events.out.tfevents.1779988037.SJQ.51076.0
 F3Net/checkpoints_ablation/A45/events.out.tfevents.1780028321.SJQ.67992.0
+
+F3Net/checkpoints_ablation/
+F3Net/improve_logs/
