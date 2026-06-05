@@ -23,3 +23,6 @@ F3Net/checkpoints_ablation/A45/events.out.tfevents.1780028321.SJQ.67992.0
 
 F3Net/checkpoints_ablation/
 F3Net/improve_logs/
+F3Net-ppa-noise/checkpoints_noise/
+F3Net-ppa-noise/improve_logs/
+F3Net-ppa-noise/data/
