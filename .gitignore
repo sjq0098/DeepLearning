@@ -26,3 +26,5 @@ F3Net/improve_logs/
 F3Net-ppa-noise/checkpoints_noise/
 F3Net-ppa-noise/improve_logs/
 F3Net-ppa-noise/data/
+
+exp0/data/MNIST/raw/
