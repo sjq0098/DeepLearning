@@ -47,3 +47,13 @@ exp2/images/rnn_loss.png
 exp1/exp1_repo.tex
 exp3/exp3.tex
 exp4/FashionMNIST/FashionMNIST/raw/train-images-idx3-ubyte.gz
+exp4/nbconvert_err.log
+exp4/nbconvert_out.log
+exp4/nbconvert.pid
+exp4/FashionMNIST/FashionMNIST/raw/t10k-images-idx3-ubyte
+exp4/FashionMNIST/FashionMNIST/raw/t10k-images-idx3-ubyte.gz
+exp4/FashionMNIST/FashionMNIST/raw/t10k-labels-idx1-ubyte
+exp4/FashionMNIST/FashionMNIST/raw/t10k-labels-idx1-ubyte.gz
+exp4/FashionMNIST/FashionMNIST/raw/train-images-idx3-ubyte
+exp4/FashionMNIST/FashionMNIST/raw/train-labels-idx1-ubyte
+exp4/FashionMNIST/FashionMNIST/raw/train-labels-idx1-ubyte.gz
