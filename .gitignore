@@ -29,3 +29,21 @@ F3Net-ppa-noise/data/
 
 exp0/data/MNIST/raw/
 exp1/data/
+exp2/data/
+
+# 小作业(exp*) 数据集 / 训练产物 / 临时下载 —— 勿提交（注意 images/ 是报告用图，保留）
+data/
+data.zip
+histories.json
+exp1/exp1_repo.tex
+exp1/images/fig_acc.png
+exp1/images/fig_bar_scatter.png
+exp1/images/fig_loss.png
+exp1/images/fig_perclass.png
+exp2/exp2.tex
+exp2/images/rnn_acc.png
+exp2/images/rnn_confusion.png
+exp2/images/rnn_loss.png
+exp1/exp1_repo.tex
+exp3/exp3.tex
+exp4/FashionMNIST/FashionMNIST/raw/train-images-idx3-ubyte.gz
