@@ -1,0 +1,321 @@
+\documentclass[a4paper]{article}
+
+\input{style/ch_xelatex.tex}
+\input{style/scala.tex}
+
+%代码段设置
+\lstset{numbers=left,
+basicstyle=\tiny,
+numberstyle=\tiny,
+keywordstyle=\color{blue!70},
+commentstyle=\color{red!50!green!50!blue!50},
+frame=single, rulesepcolor=\color{red!20!green!20!blue!20},
+escapeinside=``
+}
+
+\graphicspath{ {images/} }
+\usepackage{ctex}
+\usepackage{graphicx}
+\usepackage{color,framed}%文本框
+\usepackage{listings}
+\usepackage{caption}
+\usepackage{amssymb}
+\usepackage{enumerate}
+\usepackage{xcolor}
+\usepackage{bm}
+\usepackage{lastpage}%获得总页数
+\usepackage{fancyhdr}
+\usepackage{tabularx}
+\usepackage{geometry}
+\usepackage{minted}
+\usepackage{graphics}
+\usepackage{subfigure}
+\usepackage{float}
+\usepackage{pdfpages}
+\usepackage{pgfplots}
+\pgfplotsset{width=10cm,compat=1.9}
+\usepackage{multirow}
+\usepackage{footnote}
+\usepackage{booktabs}
+
+%-----------------------伪代码------------------
+\usepackage{algorithm}
+\usepackage{algorithmicx}
+\usepackage{algpseudocode}
+\floatname{algorithm}{Algorithm}
+\renewcommand{\algorithmicrequire}{\textbf{Input:}}
+\renewcommand{\algorithmicensure}{\textbf{Output:}}
+\usepackage{lipsum}
+\makeatletter
+\newenvironment{breakablealgorithm}
+  {% \begin{breakablealgorithm}
+  \begin{center}
+     \refstepcounter{algorithm}% New algorithm
+     \hrule height.8pt depth0pt \kern2pt% \@fs@pre for \@fs@ruled
+     \renewcommand{\caption}[2][\relax]{% Make a new \caption
+      {\raggedright\textbf{\ALG@name~\thealgorithm} ##2\par}%
+      \ifx\relax##1\relax % #1 is \relax
+         \addcontentsline{loa}{algorithm}{\protect\numberline{\thealgorithm}##2}%
+      \else % #1 is not \relax
+         \addcontentsline{loa}{algorithm}{\protect\numberline{\thealgorithm}##1}%
+      \fi
+      \kern2pt\hrule\kern2pt
+     }
+  }{% \end{breakablealgorithm}
+     \kern2pt\hrule\relax% \@fs@post for \@fs@ruled
+  \end{center}
+  }
+\makeatother
+%------------------------代码-------------------
+\usepackage{xcolor}
+\usepackage{listings}
+\lstset{
+breaklines,%自动换行
+basicstyle=\small,
+escapeinside=``,
+keywordstyle=\color{ blue!70} \bfseries,
+commentstyle=\color{red!50!green!50!blue!50},%
+stringstyle=\ttfamily,%
+extendedchars=false,%
+linewidth=\textwidth,%
+numbers=left,%
+numberstyle=\tiny \color{blue!50},%
+frame=trbl%
+rulesepcolor= \color{ red!20!green!20!blue!20}
+}
+
+%-------------------------页面边距--------------
+\geometry{a4paper,left=2.3cm,right=2.3cm,top=2.7cm,bottom=2.7cm}
+%-------------------------页眉页脚--------------
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\lhead{\kaishu \leftmark}
+% \chead{}
+\rhead{\kaishu 深度学习进阶课 实验报告}%加粗\bfseries
+\lfoot{}
+\cfoot{\thepage}
+\rfoot{}
+\renewcommand{\headrulewidth}{0.1pt}
+\renewcommand{\footrulewidth}{0pt}%去掉横线
+\newcommand{\HRule}{\rule{\linewidth}{0.5mm}}%标题横线
+\newcommand{\HRulegrossa}{\rule{\linewidth}{1.2mm}}
+\setlength{\textfloatsep}{10mm}%设置图片的前后间距
+%--------------------文档内容--------------------
+
+\begin{document}
+\renewcommand{\contentsname}{目\ 录}
+\renewcommand{\appendixname}{附录}
+\renewcommand{\appendixpagename}{附录}
+\renewcommand{\refname}{参考文献}
+\renewcommand{\figurename}{图}
+\renewcommand{\tablename}{表}
+\renewcommand{\today}{\number\year 年 \number\month 月 \number\day 日}
+
+%-------------------------封面----------------
+\begin{titlepage}
+    \begin{center}
+    \includegraphics[width=0.8\textwidth]{NKU.png}\\[1cm]
+    \vspace{20mm}
+		\textbf{\huge\textbf{\kaishu{计算机学院}}}\\[0.5cm]
+		\textbf{\huge{\kaishu{深度学习及应用（高阶课） 实验报告}}}\\[2.3cm]
+		\textbf{\Huge\textbf{\kaishu{对抗生成网络算法}}}
+
+		\vspace{\fill}
+
+    % \textbf{\Large \textbf{并行程序设计期末实验报告}}\\[0.8cm]
+    % \HRule \\[0.9cm]
+    % \HRule \\[2.0cm]
+    \centering
+    \textsc{\LARGE \kaishu{姓名\ :\ 申健强}}\\[0.5cm]
+    \textsc{\LARGE \kaishu{学号\ :\ 2313119}}\\[0.5cm]
+    \textsc{\LARGE \kaishu{专业\ :\ 计算机科学与技术}}\\[0.5cm]
+
+    \vfill
+    {\Large \today}
+    \end{center}
+\end{titlepage}
+
+\renewcommand {\thefigure}{\thesection{}.\arabic{figure}}%图片按章标号
+\renewcommand{\figurename}{图}
+\renewcommand{\contentsname}{目录}
+\cfoot{\thepage\ of \pageref{LastPage}}%当前页 of 总页数
+
+
+% 生成目录
+\clearpage
+\tableofcontents
+\newpage
+
+%--------------------------正文--------------------------------
+\section{实验目的与要求}
+本实验的目标是掌握生成对抗网络（GAN）的基本原理，并使用 PyTorch 在 \textbf{FashionMNIST} 数据集上完成图像生成任务。具体要求：
+\begin{itemize}
+  \item 掌握 GAN 的对抗训练原理；
+  \item 使用 PyTorch 搭建 GAN（全连接实现）训练 FashionMNIST，给出生成器/判别器的模型结构与训练 loss 曲线；
+  \item 自定义一组随机数，生成 8 张图；
+  \item 针对自定义的 100 维随机噪声，自由挑选 5 个维度，每个维度调整 3 次取值，生成 $15\times 8$ 张图，\textbf{重点}总结与解释调整随机数对生成结果的影响；
+  \item 加分项：用卷积实现生成器和判别器（DCGAN）。
+\end{itemize}
+
+\section{数据集与实验设置}
+\textbf{数据集.} FashionMNIST 训练集共 60000 张 $28\times 28$ 灰度服饰图像（T 恤、裤子、套衫、连衣裙、外套、凉鞋、衬衫、运动鞋、包、短靴共 10 类）。预处理仅做 \texttt{ToTensor} 并归一化到 $[-1,1]$，与生成器输出端的 Tanh 范围匹配。
+
+\textbf{训练设置.} 噪声维度 $z\_dim=100$，批大小 128，优化器 Adam（学习率 $2\times 10^{-4}$，$\beta=(0.5,\,0.999)$，DCGAN 论文推荐设置），损失为 \texttt{BCELoss}，全连接 GAN 与卷积 DCGAN 各训练 20 个 epoch（GPU），随机种子固定为 42 以保证可复现。模型定义在 \texttt{models.py}，数据/训练/生成/潜变量扰动等工具在 \texttt{train\_utils.py}，训练时记录每个 epoch 的 $G/D$ 损失与判别器对真图、假图的平均输出 $D(x)$、$D(G(z))$ 用于分析。
+
+\section{模型结构与原理}
+\subsection{GAN 的对抗训练原理}
+GAN 由\textbf{生成器} $G$ 与\textbf{判别器} $D$ 两个相互博弈的网络组成：$G$ 接收服从标准正态分布的噪声 $\bm{z}$，输出一张与真实数据同尺寸的图像 $G(\bm{z})$；$D$ 接收一张图像，输出其来自真实数据的概率。$D$ 希望把真图判为 1、假图判为 0，而 $G$ 希望自己生成的图被 $D$ 判为真，二者构成 min-max 优化问题：
+\begin{equation}
+  \min_{G}\max_{D} V(D,G)=\mathbb{E}_{\bm{x}\sim p_{data}}\big[\log D(\bm{x})\big]
+  +\mathbb{E}_{\bm{z}\sim p_{\bm{z}}}\big[\log\big(1-D(G(\bm{z}))\big)\big].
+\end{equation}
+训练时交替进行两步：(1) 固定 $G$，用一批真图（标签 1）和一批生成的假图（标签 0，对 $G$ 的输出 \texttt{detach}）以 BCE 损失更新 $D$；(2) 固定 $D$，以"假图标签为 1"计算 BCE 更新 $G$，即采用非饱和损失 $-\log D(G(\bm{z}))$ 代替 $\log(1-D(G(\bm{z})))$，缓解训练初期的梯度消失。理论均衡点处 $p_G=p_{data}$，$D$ 对任意输入输出 0.5。
+
+\subsection{全连接 GAN（主线）}
+生成器与判别器均为三层全连接网络（在老师提供的两层版本基础上加宽加深，并在 $G$ 中加入 BatchNorm 以稳定训练）：
+\begin{lstlisting}[language=Python, basicstyle=\footnotesize\ttfamily]
+FCGenerator(                              # 560,656 params
+  Linear(100 -> 256), LeakyReLU(0.2),
+  Linear(256 -> 512), BatchNorm1d(512), LeakyReLU(0.2),
+  Linear(512 -> 784), Tanh()              # -> (1, 28, 28), [-1,1]
+)
+FCDiscriminator(                          # 233,985 params
+  Linear(784 -> 256), LeakyReLU(0.2),
+  Linear(256 -> 128), LeakyReLU(0.2),
+  Linear(128 -> 1),   Sigmoid()           # -> P(real)
+)
+\end{lstlisting}
+
+\subsection{卷积 DCGAN（加分项）}
+按 DCGAN 的设计原则：生成器用\textbf{转置卷积}逐步上采样（$1\times1 \rightarrow 7\times7 \rightarrow 14\times14 \rightarrow 28\times28$），判别器用\textbf{步长为 2 的卷积}代替池化逐步下采样，均配合 BatchNorm；权重按论文初始化为 $\mathcal{N}(0,\,0.02)$：
+\begin{lstlisting}[language=Python, basicstyle=\footnotesize\ttfamily]
+DCGenerator(                              # 1,781,504 params
+  ConvTranspose2d(100, 256, k7, s1), BatchNorm2d, ReLU,   # ->  7x7
+  ConvTranspose2d(256, 128, k4, s2), BatchNorm2d, ReLU,   # -> 14x14
+  ConvTranspose2d(128,   1, k4, s2), Tanh()               # -> 28x28
+)
+DCDiscriminator(                          # 138,624 params
+  Conv2d(  1,  64, k4, s2), LeakyReLU(0.2),               # -> 14x14
+  Conv2d( 64, 128, k4, s2), BatchNorm2d, LeakyReLU(0.2),  # ->  7x7
+  Conv2d(128,   1, k7, s1), Sigmoid()                     # ->  1x1
+)
+\end{lstlisting}
+
+\section{实验结果}
+\subsection{全连接 GAN：训练 loss 曲线}
+图~\ref{fig:fcloss} 为全连接 GAN 训练 20 个 epoch 的损失曲线。$G$ 损失从初期约 1.29 缓慢降到 1.01 附近，$D$ 损失稳定在 $1.10\sim1.24$，没有任何一方崩塌，呈现健康的对抗拉锯。从判别器输出看，$D(x)$ 由 0.62 降至 0.57、$D(G(z))$ 由 0.42 升至 0.44，\textbf{双双向 0.5 靠拢}：随着 $G$ 生成质量提高，$D$ 越来越难区分真假，博弈逐渐接近理论均衡点。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\textwidth]{fc_loss.png}
+  \caption{全连接 GAN 训练损失曲线（20 epoch）}
+  \label{fig:fcloss}
+\end{figure}
+
+\subsection{自定义随机数生成 8 张图}
+固定随机种子 123 采样 8 个 100 维标准正态噪声，生成结果见图~\ref{fig:fc8}。可以辨认出包、裤子、套衫、连衣裙、运动鞋、短靴等类别，整体轮廓正确，但边缘噪点较多、纹理颗粒感明显——这是全连接生成器缺乏空间归纳偏置的典型表现。这 8 个噪声同时作为下一小节扰动实验的 8 个基准（对应 8 列）。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{fc_8samples.png}
+  \caption{FC-GAN：自定义 8 个随机噪声的生成结果}
+  \label{fig:fc8}
+\end{figure}
+
+\subsection{潜变量扰动实验（$15\times8$）}
+从 100 维噪声中挑选第 $\{5,\,25,\,45,\,65,\,85\}$ 共 5 个维度，每个维度依次取 $\{-2.5,\ 0,\ +2.5\}$ 三档（其余 99 维保持不变），对 8 个基准噪声各生成一张，得到图~\ref{fig:trav} 的 $15\times8$ 网格：每 3 行为一组、对应一个维度，组内从上到下取值递增；每列对应一个固定的基准噪声。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.58\textwidth]{fc_traversal.png}
+  \caption{潜变量扰动 $15\times8$（行 $=$ 5 维 $\times$ 3 档取值；列 $=$ 8 个基准噪声）}
+  \label{fig:trav}
+\end{figure}
+
+逐维观察可以总结出以下现象（成因解释见第~\ref{sec:insight} 节）：
+\begin{itemize}
+  \item \textbf{单一维度的改变引起整张图的"整体渐变"}，而不是某个孤立的语义属性（如只改袖长）。同一列内，调整一个维度时衣物的明暗、轮廓宽窄、纹理分布同时连续变化；
+  \item \textbf{多数情况下类别保持不变}：基准噪声决定了生成"哪一类"衣物（是裤子的列始终是裤子），单维扰动主要在该类别内部做形变；但在少数（维度，列）组合上，$\pm2.5$ 的大幅取值会把样本推过类别边界，出现鞋$\leftrightarrow$靴、上衣轮廓互相过渡的现象；
+  \item \textbf{取值幅度决定变化强度}：取 0 档时图像最接近"平均"形态，$\pm2.5$ 两端变化最剧烈、且常伴随噪点增多；
+  \item \textbf{不同维度的作用方向不同}：有的维度主要影响整体亮度与对比度，有的主要影响衣物的宽窄与底部形状；同一维度对不同基准噪声（不同列）的影响也不完全一致。
+\end{itemize}
+
+\subsection{加分项：DCGAN 的训练与生成结果}
+DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:dcloss}；用与图~\ref{fig:fc8} 相同的 8 个自定义噪声生成的结果见图~\ref{fig:dc8}，衣物边缘锐利、明暗过渡自然，质量明显高于全连接版本。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.62\textwidth]{dc_loss.png}
+  \caption{DCGAN 训练损失曲线（20 epoch）}
+  \label{fig:dcloss}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{dc_8samples.png}
+  \caption{DCGAN：同样 8 个随机噪声的生成结果}
+  \label{fig:dc8}
+\end{figure}
+
+\subsection{扩展实验：CelebA 人脸上的 DCGAN}
+为进一步检验 DCGAN 在大规模彩色图像上的能力，我们完整运行了 PyTorch 官方 DCGAN 教程：在 \textbf{CelebA} 数据集（202{,}599 张人脸，对齐裁剪到 $64\times64$ RGB）上训练 5 个 epoch（batch 128，Adam $lr=2\times10^{-4}$、$\beta_1=0.5$，网络加深为 5 层卷积/转置卷积）。训练末期 $D(x)\approx0.78$、$D(G(z))\approx0.13$，损失曲线与真假对比见图~\ref{fig:celeba}。生成的人脸已具备完整的五官布局、肤色光影和发型轮廓，部分样本接近以假乱真，但仍可见局部扭曲——对 20 万张图而言 5 个 epoch 尚未充分收敛。该实验说明同一套对抗训练框架可以无缝扩展到更高分辨率的彩色图像。
+
+\begin{figure}[H]
+  \centering
+  \subfigure[训练损失曲线]{\includegraphics[width=0.55\textwidth]{celeba_loss.png}}
+  \subfigure[真实人脸（左）与生成人脸（右）]{\includegraphics[width=0.42\textwidth]{celeba_real_fake.png}}
+  \caption{CelebA 上的 DCGAN：损失曲线与真假样本对比（5 epoch）}
+  \label{fig:celeba}
+\end{figure}
+
+\section{对比分析}
+表~\ref{tab:cmp} 汇总全连接 GAN 与 DCGAN 的最终指标，图~\ref{fig:cmp} 用同一组 16 个噪声直观对比二者的生成质量。
+
+\begin{table}[H]
+  \centering
+  \caption{全连接 GAN 与 DCGAN 对比（第 20 epoch 的 epoch 均值）}
+  \label{tab:cmp}
+  \begin{tabular}{lrrrrr}
+    \toprule
+    模型 & $G$ 参数量 & $D$ 参数量 & $G$ loss & $D$ loss & $D(x)\,/\,D(G(z))$ \\
+    \midrule
+    全连接 GAN & 560{,}656 & 233{,}985 & 1.008 & 1.237 & 0.566 / 0.437 \\
+    DCGAN（卷积） & 1{,}781{,}504 & 138{,}624 & 1.108 & 1.181 & 0.587 / 0.413 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\begin{figure}[H]
+  \centering
+  \subfigure[FC-GAN 样本]{\includegraphics[width=0.48\textwidth]{cmp_fc.png}}
+  \subfigure[DCGAN 样本]{\includegraphics[width=0.48\textwidth]{cmp_dc.png}}
+  \caption{同一组 16 个噪声下 FC-GAN 与 DCGAN 的生成对比}
+  \label{fig:cmp}
+\end{figure}
+
+两者的损失数值相近——这是对抗损失的特点，它衡量的是博弈状态而非绝对生成质量——但\textbf{视觉质量差距显著}：DCGAN 生成的衣物边缘锐利、明暗过渡自然、几乎没有椒盐噪点，裤腿、鞋型、衣领等局部结构清晰；FC-GAN 则普遍带有颗粒噪声、轮廓发虚。原因在于卷积结构的\textbf{空间归纳偏置}：转置卷积的局部感受野与权重共享让相邻像素天然相关，生成图像局部平滑、结构连贯；而全连接层把 784 个像素当作彼此独立的输出维度，必须靠数据"硬学"像素间的空间相关性，因此更容易出现噪点。
+
+\section{实验心得（重点）：随机数调整对生成结果的影响}
+\label{sec:insight}
+结合 $15\times8$ 扰动实验，对"调整随机数如何影响生成结果"总结如下：
+\begin{itemize}
+  \item \textbf{噪声 $\bm{z}$ 是生成图像唯一的信息来源，其整体位置决定"生成什么"}。生成器学到的是从 100 维标准正态分布到图像流形的连续映射 $G:\mathbb{R}^{100}\rightarrow\mathbb{R}^{28\times28}$。8 个基准噪声落在流形的不同区域，因此分别对应包、裤子、套衫、鞋等不同类别——"类别"这一最主要的语义由 $\bm{z}$ 的整体位置决定，而非某一维单独决定。
+  \item \textbf{普通 GAN 的潜空间是"纠缠"的：单个维度不对应单个语义属性}。实验中调整任何一维，都观察到亮度、形状、纹理的\textbf{联动渐变}，找不到一个"只控制袖长"或"只控制明暗"的维度。这是因为标准 GAN 的训练目标只要求生成分布逼近数据分布，对潜空间的组织方式没有任何约束，各语义因子自然地以混合的方式分布在所有维度上（这正是 InfoGAN、StyleGAN 等后续工作引入解耦约束的动机）。
+  \item \textbf{$G$ 是连续映射，因此扰动带来的是平滑过渡}。取值从 $-2.5$ 经 0 到 $+2.5$，图像呈连续形变而非跳变；只有当扰动把 $\bm{z}$ 推过两个类别在潜空间中的边界时，才会看到鞋$\leftrightarrow$靴这类离散的类别切换，且切换附近往往出现"两类之间"的模糊形态。
+  \item \textbf{扰动幅度与生成质量的关系印证了训练分布的作用}。$|z_d|\leq 1$ 附近（标准正态的高密度区）生成质量最好；取到 $\pm2.5$ 时图像变化剧烈且噪点增多，因为训练时几乎采不到这些低密度区域的样本，生成器在那里的映射没有得到充分学习。
+  \item \textbf{同一维度对不同基准噪声的影响不同}。这说明 $G$ 学到的映射是高度非线性的：某一维的"语义方向"依赖于 $\bm{z}$ 所处的局部邻域，在流形的不同区域，同一坐标轴方向对应不同的图像变化。
+\end{itemize}
+
+此外，本实验对 GAN 的训练动态也有直观体会：判别器输出 $D(x)$ 与 $D(G(z))$ 从两端向 0.5 靠拢、损失曲线呈拉锯而非单调下降，是对抗训练健康进行的标志；而 DCGAN 与 FC-GAN 损失数值接近、视觉质量却差距明显，提醒我们\textbf{对抗损失不能直接当作生成质量的度量}，结构先验（卷积）对生成图像质量起着决定性作用。
+
+\section{结论}
+本实验在 FashionMNIST 上实现并训练了全连接 GAN 与卷积 DCGAN。全连接 GAN 经 20 个 epoch 训练后能生成类别可辨的服饰图像，判别器输出向 0.5 收敛表明对抗博弈接近均衡；$15\times8$ 潜变量扰动实验表明：噪声的整体位置决定生成类别，单维扰动引起图像的整体平滑渐变，幅度越大变化越剧烈，且普通 GAN 的潜空间语义高度纠缠、单维不对应可解释的独立属性。加分项 DCGAN 凭借卷积的空间归纳偏置，在损失数值相近的情况下生成质量显著优于全连接实现；扩展到 CelebA 人脸数据集后，同一框架也能生成具备完整五官结构的 $64\times64$ 彩色人脸。实验完整验证了 GAN 的对抗训练原理，并直观展示了结构先验与潜空间性质对生成模型的影响。
+
+\begin{thebibliography}{9}
+  \bibitem{gan} I.~Goodfellow, J.~Pouget-Abadie, M.~Mirza, et al. Generative Adversarial Nets. \textit{NeurIPS}, 2014.
+  \bibitem{dcgan} A.~Radford, L.~Metz, S.~Chintala. Unsupervised Representation Learning with Deep Convolutional Generative Adversarial Networks. \textit{ICLR}, 2016.
+  \bibitem{fashionmnist} H.~Xiao, K.~Rasul, R.~Vollgraf. Fashion-MNIST: a Novel Image Dataset for Benchmarking Machine Learning Algorithms. \textit{arXiv:1708.07747}, 2017.
+  \bibitem{tutorial} N.~Inkawhich. DCGAN Tutorial. PyTorch Tutorials.
+\end{thebibliography}
+
+\end{document}
