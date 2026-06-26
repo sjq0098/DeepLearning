@@ -58,3 +58,4 @@ exp4/FashionMNIST/FashionMNIST/raw/train-images-idx3-ubyte
 exp4/FashionMNIST/FashionMNIST/raw/train-labels-idx1-ubyte
 exp4/FashionMNIST/FashionMNIST/raw/train-labels-idx1-ubyte.gz
 TemplateNKU-master/
+exp4/mc_data.pt

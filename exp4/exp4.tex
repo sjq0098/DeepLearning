@@ -154,6 +154,7 @@ rulesepcolor= \color{ red!20!green!20!blue!20}
   \item 使用 PyTorch 搭建 GAN（全连接实现）训练 FashionMNIST，给出生成器/判别器的模型结构与训练 loss 曲线；
   \item 自定义一组随机数，生成 8 张图；
   \item 针对自定义的 100 维随机噪声，自由挑选 5 个维度，每个维度调整 3 次取值，生成 $15\times 8$ 张图，\textbf{重点}总结与解释调整随机数对生成结果的影响；
+  \item 讨论 GAN 的\textbf{模式崩溃}问题及其成因与对策，并通过实验加以演示；
   \item 加分项：用卷积实现生成器和判别器（DCGAN）。
 \end{itemize}
 
@@ -287,13 +288,21 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
 
 \begin{figure}[H]
   \centering
-  \subfigure[FC-GAN 样本]{\includegraphics[width=0.48\textwidth]{cmp_fc.png}}
-  \subfigure[DCGAN 样本]{\includegraphics[width=0.48\textwidth]{cmp_dc.png}}
-  \caption{同一组 16 个噪声下 FC-GAN 与 DCGAN 的生成对比}
+  \includegraphics[width=\textwidth]{exp4_quality.png}
+  \caption{生成质量对比。上：真实图 / FC-GAN / DCGAN（FC 与 DC 用同一组 16 个噪声）；下：同一噪声的中心局部放大——FC-GAN 边缘颗粒噪点明显，DCGAN 锐利平滑。}
   \label{fig:cmp}
 \end{figure}
 
 两者的损失数值相近——这是对抗损失的特点，它衡量的是博弈状态而非绝对生成质量——但\textbf{视觉质量差距显著}：DCGAN 生成的衣物边缘锐利、明暗过渡自然、几乎没有椒盐噪点，裤腿、鞋型、衣领等局部结构清晰；FC-GAN 则普遍带有颗粒噪声、轮廓发虚。原因在于卷积结构的\textbf{空间归纳偏置}：转置卷积的局部感受野与权重共享让相邻像素天然相关，生成图像局部平滑、结构连贯；而全连接层把 784 个像素当作彼此独立的输出维度，必须靠数据"硬学"像素间的空间相关性，因此更容易出现噪点。
+
+\textbf{从生成器内部看卷积的作用.} 进一步可视化 DCGAN 生成器的中间特征图（图~\ref{fig:featmaps}）：噪声 $\bm{z}$ 先被转置卷积投影成 $256$ 个 $7\times7$ 的\textbf{粗特征}（勾勒大致轮廓与布局），再经两层 stride-2 转置卷积上采样为 $128$ 个 $14\times14$ 的\textbf{中层特征}（细化边缘与局部结构），最后合成 $28\times28$ 的图像。这种“由粗到细、逐级上采样”的合成过程正是卷积生成器优于全连接的本质：空间结构是\textbf{逐层、局部地}被构造出来的，而非由全连接层一次性把每个像素独立预测出来。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{exp4_featmaps.png}
+  \caption{DCGAN 生成器中间特征图：$\bm{z}\to 7\times7$（256 通道，粗轮廓）$\to 14\times14$（128 通道，细化）$\to 28\times28$ 输出（各阶段展示 8 个通道）。}
+  \label{fig:featmaps}
+\end{figure}
 
 \section{实验心得（重点）：随机数调整对生成结果的影响}
 \label{sec:insight}
@@ -306,10 +315,34 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
   \item \textbf{同一维度对不同基准噪声的影响不同}。这说明 $G$ 学到的映射是高度非线性的：某一维的"语义方向"依赖于 $\bm{z}$ 所处的局部邻域，在流形的不同区域，同一坐标轴方向对应不同的图像变化。
 \end{itemize}
 
+\textbf{潜空间插值与截断：另外两种“调随机数”的视角.} 除单维扰动外，我们再用两种方式考察噪声的影响（图~\ref{fig:noise}，用 DCGAN 生成）。\textbf{球面插值}：在两个随机噪声之间做球面线性插值，生成结果\textbf{平滑地从一种衣物过渡到另一种}、没有突兀跳变——直观证明 $G$ 是从噪声到图像的连续映射。\textbf{截断技巧}：把噪声整体乘以系数 $\sigma$，$\sigma$ 越小（采样越集中于分布中心）生成越规整但越雷同（保真度高、多样性低），$\sigma$ 越大越多样但畸变与噪点增多——这与上面“高密度区质量好、低密度区质量差”的结论互相印证，也是 BigGAN 等工作中“截断换保真”技巧的由来。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{exp4_noise.png}
+  \caption{随机数影响的另外两种视角（DCGAN）。(a) 两个噪声间的球面插值：生成图像连续过渡，说明 $G$ 是连续映射；(b) 噪声幅度 $\sigma$ 由小到大：保真度与多样性此消彼长。}
+  \label{fig:noise}
+\end{figure}
+
 此外，本实验对 GAN 的训练动态也有直观体会：判别器输出 $D(x)$ 与 $D(G(z))$ 从两端向 0.5 靠拢、损失曲线呈拉锯而非单调下降，是对抗训练健康进行的标志；而 DCGAN 与 FC-GAN 损失数值接近、视觉质量却差距明显，提醒我们\textbf{对抗损失不能直接当作生成质量的度量}，结构先验（卷积）对生成图像质量起着决定性作用。
 
+\section{GAN 的模式崩溃问题与对策}
+\label{sec:collapse}
+\textbf{什么是模式崩溃.} 模式崩溃（mode collapse）指生成器只学会产出少数几种样本、覆盖不了真实数据的全部模态。其根源在于 GAN 的极小极大博弈：生成器的目标只是“骗过\textbf{当前}判别器”，一旦它找到某几个能稳定骗过 $D$ 的输出，就会把大量不同的噪声 $\bm{z}$ 都映射到这几个输出上，从而丢失多样性；当 $D$ 与 $G$ 的更新失衡（如 $D$ 过弱、学习率不当）或缺乏稳定化手段时尤其容易发生。
+
+\textbf{实验演示.} 为直观展示，我们在相同数据上训练两个全连接 GAN：一个采用\textbf{健康设置}（生成器带 BatchNorm、$G/D$ 学习率平衡、$1{:}1$ 更新），另一个\textbf{故意制造失衡}（去掉生成器 BatchNorm、判别器学习率调低且每步多更新生成器）。训练后各采样 2000 张，用一个在 FashionMNIST 上训练的小型 CNN 分类器统计生成样本落入 10 个类别的分布（图~\ref{fig:collapse}）。结果非常清晰：健康模型的生成样本\textbf{覆盖全部 10 类}（类别分布熵 $2.16$，接近均匀上限 $\ln 10\approx2.30$）；崩溃模型则\textbf{几乎只生成 Sandal 与 Shirt 两类}（熵骤降到 $0.68$），其余 8 类几乎从不出现——这正是模式崩溃的典型表现，且生成质量也随之劣化。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{mc_collapse.png}
+  \caption{模式崩溃演示。(a) 健康 GAN 样本；(b) 崩溃 GAN 样本；(c) 用 FashionMNIST 分类器统计的生成类别分布——健康模型覆盖 10 类（熵 $2.16$），崩溃模型几乎只产出 2 类（熵 $0.68$）。}
+  \label{fig:collapse}
+\end{figure}
+
+\textbf{常见对策.} 缓解模式崩溃的主要思路包括：(1) \textbf{改进损失/距离度量}，如 WGAN、WGAN-GP 以 Wasserstein 距离提供更平滑、不易饱和的梯度；(2) \textbf{让判别器“看到”批内多样性}，如 minibatch discrimination、feature matching，使 $D$ 能惩罚“整批雷同”；(3) \textbf{稳定化训练技巧}，如谱归一化（spectral norm）、双时间尺度更新（TTUR）、单边标签平滑、给 $D$ 输入加噪；(4) \textbf{结构与更新平衡}，保持 $G/D$ 容量与更新频率匹配、生成器使用 BatchNorm。本实验中“健康设置”正是综合了平衡更新与 BatchNorm，因而全程未出现崩溃（见 §\ref{sec:insight} 起始对 $D(x),D(G(z))$ 向 $0.5$ 收敛的分析）。
+
 \section{结论}
-本实验在 FashionMNIST 上实现并训练了全连接 GAN 与卷积 DCGAN。全连接 GAN 经 20 个 epoch 训练后能生成类别可辨的服饰图像，判别器输出向 0.5 收敛表明对抗博弈接近均衡；$15\times8$ 潜变量扰动实验表明：噪声的整体位置决定生成类别，单维扰动引起图像的整体平滑渐变，幅度越大变化越剧烈，且普通 GAN 的潜空间语义高度纠缠、单维不对应可解释的独立属性。加分项 DCGAN 凭借卷积的空间归纳偏置，在损失数值相近的情况下生成质量显著优于全连接实现；扩展到 CelebA 人脸数据集后，同一框架也能生成具备完整五官结构的 $64\times64$ 彩色人脸。实验完整验证了 GAN 的对抗训练原理，并直观展示了结构先验与潜空间性质对生成模型的影响。
+本实验在 FashionMNIST 上实现并训练了全连接 GAN 与卷积 DCGAN。全连接 GAN 经 20 个 epoch 训练后能生成类别可辨的服饰图像，判别器输出向 0.5 收敛表明对抗博弈接近均衡；$15\times8$ 潜变量扰动实验表明：噪声的整体位置决定生成类别，单维扰动引起图像的整体平滑渐变，幅度越大变化越剧烈，且普通 GAN 的潜空间语义高度纠缠、单维不对应可解释的独立属性。加分项 DCGAN 凭借卷积的空间归纳偏置，在损失数值相近的情况下生成质量显著优于全连接实现，其中间特征图清晰展现了“由粗到细、逐级上采样”的合成过程；扩展到 CelebA 人脸数据集后，同一框架也能生成具备完整五官结构的 $64\times64$ 彩色人脸。我们还专门设计对照实验演示了\textbf{模式崩溃}：失衡训练下生成类别从 10 类塌缩到 2 类（熵 $2.16\!\to\!0.68$），并讨论了 WGAN-GP、minibatch discrimination、谱归一化等对策。实验完整验证了 GAN 的对抗训练原理，并直观展示了结构先验、潜空间性质与训练稳定性对生成模型的影响。
 
 \begin{thebibliography}{9}
   \bibitem{gan} I.~Goodfellow, J.~Pouget-Abadie, M.~Mirza, et al. Generative Adversarial Nets. \textit{NeurIPS}, 2014.

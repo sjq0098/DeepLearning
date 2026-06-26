@@ -1,0 +1,51 @@
+[clf] epoch 1/3 acc=0.7969
+[clf] epoch 2/3 acc=0.8765
+[clf] epoch 3/3 acc=0.8958
+
+==== —µ¡∑Ω°øµ GAN ====
+[healthy] ep 1 lossD=1.207 lossG=0.913 Dx=0.615 DGz=0.501 div=9.190
+[healthy] ep 2 lossD=1.137 lossG=1.254 Dx=0.602 DGz=0.429 div=9.581
+[healthy] ep 3 lossD=1.116 lossG=1.320 Dx=0.609 DGz=0.411 div=9.393
+[healthy] ep 4 lossD=1.129 lossG=1.267 Dx=0.606 DGz=0.408 div=9.971
+[healthy] ep 5 lossD=1.145 lossG=1.222 Dx=0.602 DGz=0.408 div=9.940
+[healthy] ep 6 lossD=1.169 lossG=1.158 Dx=0.594 DGz=0.414 div=9.811
+[healthy] ep 7 lossD=1.171 lossG=1.148 Dx=0.591 DGz=0.415 div=10.376
+[healthy] ep 8 lossD=1.191 lossG=1.109 Dx=0.586 DGz=0.423 div=10.220
+[healthy] ep 9 lossD=1.189 lossG=1.100 Dx=0.586 DGz=0.421 div=10.628
+[healthy] ep10 lossD=1.215 lossG=1.039 Dx=0.577 DGz=0.430 div=10.445
+[healthy] ep11 lossD=1.209 lossG=1.043 Dx=0.578 DGz=0.429 div=9.796
+[healthy] ep12 lossD=1.226 lossG=1.021 Dx=0.572 DGz=0.433 div=11.186
+[healthy] ep13 lossD=1.222 lossG=1.036 Dx=0.573 DGz=0.433 div=10.132
+[healthy] ep14 lossD=1.225 lossG=1.027 Dx=0.572 DGz=0.434 div=10.285
+[healthy] ep15 lossD=1.244 lossG=1.001 Dx=0.566 DGz=0.439 div=10.370
+[healthy] ep16 lossD=1.235 lossG=0.989 Dx=0.567 DGz=0.438 div=10.791
+[healthy] ep17 lossD=1.240 lossG=0.983 Dx=0.566 DGz=0.439 div=10.593
+[healthy] ep18 lossD=1.233 lossG=0.986 Dx=0.567 DGz=0.437 div=10.807
+[healthy] ep19 lossD=1.242 lossG=0.978 Dx=0.564 DGz=0.439 div=10.472
+[healthy] ep20 lossD=1.255 lossG=0.960 Dx=0.559 DGz=0.443 div=9.681
+
+==== —µ¡∑±¿¿£ GAN ====
+[collapsed] ep 1 lossD=1.459 lossG=0.548 Dx=0.566 DGz=0.584 div=0.469
+[collapsed] ep 2 lossD=1.407 lossG=0.653 Dx=0.514 DGz=0.523 div=0.669
+[collapsed] ep 3 lossD=1.403 lossG=0.671 Dx=0.507 DGz=0.514 div=1.012
+[collapsed] ep 4 lossD=1.397 lossG=0.684 Dx=0.502 DGz=0.507 div=2.608
+[collapsed] ep 5 lossD=1.396 lossG=0.689 Dx=0.500 DGz=0.504 div=2.950
+[collapsed] ep 6 lossD=1.394 lossG=0.689 Dx=0.501 DGz=0.504 div=2.998
+[collapsed] ep 7 lossD=1.392 lossG=0.691 Dx=0.500 DGz=0.503 div=5.159
+[collapsed] ep 8 lossD=1.394 lossG=0.685 Dx=0.503 DGz=0.506 div=2.837
+[collapsed] ep 9 lossD=1.392 lossG=0.691 Dx=0.502 DGz=0.504 div=2.065
+[collapsed] ep10 lossD=1.389 lossG=0.693 Dx=0.503 DGz=0.503 div=6.258
+[collapsed] ep11 lossD=1.389 lossG=0.697 Dx=0.500 DGz=0.500 div=7.923
+[collapsed] ep12 lossD=1.388 lossG=0.697 Dx=0.501 DGz=0.501 div=5.217
+[collapsed] ep13 lossD=1.383 lossG=0.695 Dx=0.505 DGz=0.502 div=4.895
+[collapsed] ep14 lossD=1.381 lossG=0.698 Dx=0.505 DGz=0.501 div=9.324
+[collapsed] ep15 lossD=1.377 lossG=0.703 Dx=0.508 DGz=0.500 div=6.308
+[collapsed] ep16 lossD=1.378 lossG=0.696 Dx=0.515 DGz=0.506 div=5.918
+[collapsed] ep17 lossD=1.376 lossG=0.703 Dx=0.511 DGz=0.501 div=8.750
+[collapsed] ep18 lossD=1.366 lossG=0.708 Dx=0.514 DGz=0.499 div=7.066
+[collapsed] ep19 lossD=1.363 lossG=0.699 Dx=0.524 DGz=0.504 div=6.327
+[collapsed] ep20 lossD=1.374 lossG=0.707 Dx=0.514 DGz=0.501 div=10.244
+
+==== DONE ====
+healthy : entropy=2.159 div=9.681 cov=[125, 131, 84, 217, 289, 116, 508, 211, 151, 168]
+collapsed: entropy=0.679 div=10.244 cov=[0, 0, 0, 0, 0, 831, 1169, 0, 0, 0]
