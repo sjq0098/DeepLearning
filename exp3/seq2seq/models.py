@@ -89,12 +89,25 @@ class BahdanauAttention(nn.Module):
         return context, weights
 
 
+class DotProductAttention(nn.Module):
+    """缩放点积注意力（Transformer "Attention is all you need" 所用）：
+    score = (q·k)/sqrt(d)，再 softmax 加权。与加性注意力不同，它\textbf{无可学习参数}，
+    靠 query/key 在同一表示空间的内积来度量相关性，计算上更高效、易并行。"""
+    def forward(self, query, keys):
+        d = query.size(-1)
+        scores = torch.bmm(query, keys.transpose(1, 2)) / (d ** 0.5)   # (batch, 1, seq)
+        weights = F.softmax(scores, dim=-1)
+        context = torch.bmm(weights, keys)                            # (batch, 1, hidden)
+        return context, weights
+
+
 class AttnDecoderRNN(nn.Module):
-    """带 Bahdanau 注意力的解码器。"""
-    def __init__(self, hidden_size, output_size, dropout_p=0.1):
+    """带注意力的解码器；attn_type 可选 'bahdanau'(加性) 或 'dot'(缩放点积)。"""
+    def __init__(self, hidden_size, output_size, dropout_p=0.1, attn_type='bahdanau'):
         super().__init__()
         self.embedding = nn.Embedding(output_size, hidden_size)
-        self.attention = BahdanauAttention(hidden_size)
+        self.attention = (BahdanauAttention(hidden_size) if attn_type == 'bahdanau'
+                          else DotProductAttention())
         self.gru = nn.GRU(2 * hidden_size, hidden_size, batch_first=True)
         self.out = nn.Linear(hidden_size, output_size)
         self.dropout = nn.Dropout(dropout_p)

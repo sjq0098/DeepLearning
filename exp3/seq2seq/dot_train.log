@@ -1,0 +1,10 @@
+¾ä¶ÔÊý: 11445 | fra: 4601 ´Ê | eng: 2991 ´Ê
+training dot-product attention seq2seq ...
+epoch   1/30  loss=2.4940  (5s)
+epoch   5/30  loss=1.0899  (24s)
+epoch  10/30  loss=0.6116  (48s)
+epoch  15/30  loss=0.3566  (71s)
+epoch  20/30  loss=0.2179  (97s)
+epoch  25/30  loss=0.1402  (121s)
+epoch  30/30  loss=0.1000  (146s)
+DOT done: bleu=74.18 final_loss=0.1000 params=1604911

@@ -71,7 +71,7 @@ escapeinside=``
 \usepackage{listings}
 \lstset{
 breaklines,%自动换行
-basicstyle=\small,
+basicstyle=\scriptsize\ttfamily,
 escapeinside=``,
 keywordstyle=\color{ blue!70} \bfseries,
 commentstyle=\color{red!50!green!50!blue!50},%
@@ -99,7 +99,10 @@ rulesepcolor= \color{ red!20!green!20!blue!20}
 \renewcommand{\footrulewidth}{0pt}%去掉横线
 \newcommand{\HRule}{\rule{\linewidth}{0.5mm}}%标题横线
 \newcommand{\HRulegrossa}{\rule{\linewidth}{1.2mm}}
-\setlength{\textfloatsep}{10mm}%设置图片的前后间距
+\setlength{\textfloatsep}{4mm}%设置图片的前后间距
+\setlength{\intextsep}{4mm}
+\setlength{\abovecaptionskip}{2mm}
+\setlength{\belowcaptionskip}{0mm}
 %--------------------文档内容--------------------
 
 \begin{document}
@@ -154,8 +157,7 @@ rulesepcolor= \color{ red!20!green!20!blue!20}
   \item 使用 PyTorch 搭建 GAN（全连接实现）训练 FashionMNIST，给出生成器/判别器的模型结构与训练 loss 曲线；
   \item 自定义一组随机数，生成 8 张图；
   \item 针对自定义的 100 维随机噪声，自由挑选 5 个维度，每个维度调整 3 次取值，生成 $15\times 8$ 张图，\textbf{重点}总结与解释调整随机数对生成结果的影响；
-  \item 讨论 GAN 的\textbf{模式崩溃}问题及其成因与对策，并通过实验加以演示；
-  \item 加分项：用卷积实现生成器和判别器（DCGAN）。
+  \item 用卷积实现生成器和判别器（DCGAN）。
 \end{itemize}
 
 \section{数据集与实验设置}
@@ -172,104 +174,66 @@ GAN 由\textbf{生成器} $G$ 与\textbf{判别器} $D$ 两个相互博弈的网
 \end{equation}
 训练时交替进行两步：(1) 固定 $G$，用一批真图（标签 1）和一批生成的假图（标签 0，对 $G$ 的输出 \texttt{detach}）以 BCE 损失更新 $D$；(2) 固定 $D$，以"假图标签为 1"计算 BCE 更新 $G$，即采用非饱和损失 $-\log D(G(\bm{z}))$ 代替 $\log(1-D(G(\bm{z})))$，缓解训练初期的梯度消失。理论均衡点处 $p_G=p_{data}$，$D$ 对任意输入输出 0.5。
 
-\subsection{全连接 GAN（主线）}
+\subsection{全连接 GAN}
 生成器与判别器均为三层全连接网络（在老师提供的两层版本基础上加宽加深，并在 $G$ 中加入 BatchNorm 以稳定训练）：
-\begin{lstlisting}[language=Python, basicstyle=\footnotesize\ttfamily]
-FCGenerator(                              # 560,656 params
-  Linear(100 -> 256), LeakyReLU(0.2),
-  Linear(256 -> 512), BatchNorm1d(512), LeakyReLU(0.2),
-  Linear(512 -> 784), Tanh()              # -> (1, 28, 28), [-1,1]
-)
-FCDiscriminator(                          # 233,985 params
-  Linear(784 -> 256), LeakyReLU(0.2),
-  Linear(256 -> 128), LeakyReLU(0.2),
-  Linear(128 -> 1),   Sigmoid()           # -> P(real)
-)
+\texttt{print(net)} 输出如下（为简洁略去 BatchNorm 的默认超参）：
+\begin{lstlisting}[language=Python, basicstyle=\scriptsize\ttfamily]
+FCGenerator(  # 560,656 params          FCDiscriminator(  # 233,985 params
+  (net): Sequential(                      (net): Sequential(
+    (0): Linear(100, 256, bias=True)        (0): Linear(784, 256, bias=True)
+    (1): LeakyReLU(0.2, inplace=True)       (1): LeakyReLU(0.2, inplace=True)
+    (2): Linear(256, 512, bias=True)        (2): Linear(256, 128, bias=True)
+    (3): BatchNorm1d(512)                   (3): LeakyReLU(0.2, inplace=True)
+    (4): LeakyReLU(0.2, inplace=True)       (4): Linear(128, 1, bias=True)
+    (5): Linear(512, 784, bias=True)        (5): Sigmoid() ) )  # -> P(real)
+    (6): Tanh() ) )  # -> (1,28,28),[-1,1]
 \end{lstlisting}
 
-\subsection{卷积 DCGAN（加分项）}
+\subsection{卷积 DCGAN}
 按 DCGAN 的设计原则：生成器用\textbf{转置卷积}逐步上采样（$1\times1 \rightarrow 7\times7 \rightarrow 14\times14 \rightarrow 28\times28$），判别器用\textbf{步长为 2 的卷积}代替池化逐步下采样，均配合 BatchNorm；权重按论文初始化为 $\mathcal{N}(0,\,0.02)$：
-\begin{lstlisting}[language=Python, basicstyle=\footnotesize\ttfamily]
-DCGenerator(                              # 1,781,504 params
-  ConvTranspose2d(100, 256, k7, s1), BatchNorm2d, ReLU,   # ->  7x7
-  ConvTranspose2d(256, 128, k4, s2), BatchNorm2d, ReLU,   # -> 14x14
-  ConvTranspose2d(128,   1, k4, s2), Tanh()               # -> 28x28
-)
-DCDiscriminator(                          # 138,624 params
-  Conv2d(  1,  64, k4, s2), LeakyReLU(0.2),               # -> 14x14
-  Conv2d( 64, 128, k4, s2), BatchNorm2d, LeakyReLU(0.2),  # ->  7x7
-  Conv2d(128,   1, k7, s1), Sigmoid()                     # ->  1x1
-)
+\texttt{print(net)} 输出如下（BatchNorm/激活合并行、空间尺寸见上文）：
+\begin{lstlisting}[language=Python, basicstyle=\scriptsize\ttfamily]
+DCGenerator(  # 1,781,504 params
+  (net): Sequential(
+    (0): ConvTranspose2d(100, 256, kernel_size=(7,7), stride=(1,1), bias=False)
+    (1): BatchNorm2d(256)   (2): ReLU(inplace=True)
+    (3): ConvTranspose2d(256, 128, kernel_size=(4,4), stride=(2,2), padding=(1,1), bias=False)
+    (4): BatchNorm2d(128)   (5): ReLU(inplace=True)
+    (6): ConvTranspose2d(128, 1, kernel_size=(4,4), stride=(2,2), padding=(1,1), bias=False)
+    (7): Tanh() ) )
+DCDiscriminator(  # 138,624 params
+  (net): Sequential(
+    (0): Conv2d(1, 64, kernel_size=(4,4), stride=(2,2), padding=(1,1), bias=False)
+    (1): LeakyReLU(0.2, inplace=True)
+    (2): Conv2d(64, 128, kernel_size=(4,4), stride=(2,2), padding=(1,1), bias=False)
+    (3): BatchNorm2d(128)   (4): LeakyReLU(0.2, inplace=True)
+    (5): Conv2d(128, 1, kernel_size=(7,7), stride=(1,1), bias=False)   (6): Sigmoid() ) )
 \end{lstlisting}
 
 \section{实验结果}
-\subsection{全连接 GAN：训练 loss 曲线}
-图~\ref{fig:fcloss} 为全连接 GAN 训练 20 个 epoch 的损失曲线。$G$ 损失从初期约 1.29 缓慢降到 1.01 附近，$D$ 损失稳定在 $1.10\sim1.24$，没有任何一方崩塌，呈现健康的对抗拉锯。从判别器输出看，$D(x)$ 由 0.62 降至 0.57、$D(G(z))$ 由 0.42 升至 0.44，\textbf{双双向 0.5 靠拢}：随着 $G$ 生成质量提高，$D$ 越来越难区分真假，博弈逐渐接近理论均衡点。
+\subsection{训练对比：FC-GAN 与 DCGAN}
+两套模型各训练 20 个 epoch，损失曲线与判别器输出见图~\ref{fig:losses}。两者的 $G/D$ 损失都呈\textbf{拉锯而非单调下降}，判别器输出最终都落在 0.5 两侧（FC: $D(x)/D(G(z))=0.57/0.44$，DC: $0.59/0.41$）、接近理论均衡点，全程没有任何一方崩塌；其中 \textbf{DCGAN} 的 $D(x)/D(G(z))$ 由 $0.75/0.27$ \textbf{双向收敛}到 0.5 附近，最为典型。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.62\textwidth]{fc_loss.png}
-  \caption{全连接 GAN 训练损失曲线（20 epoch）}
-  \label{fig:fcloss}
+  \includegraphics[width=\textwidth]{gan_losses.png}
+  \caption{FC-GAN（左）与 DCGAN（右）的训练损失（实线）与判别器输出 $D(x)$、$D(G(z))$（虚线，向 0.5 收敛），表明对抗训练健康。}
+  \label{fig:losses}
 \end{figure}
 
-\subsection{自定义随机数生成 8 张图}
-固定随机种子 123 采样 8 个 100 维标准正态噪声，生成结果见图~\ref{fig:fc8}。可以辨认出包、裤子、套衫、连衣裙、运动鞋、短靴等类别，整体轮廓正确，但边缘噪点较多、纹理颗粒感明显——这是全连接生成器缺乏空间归纳偏置的典型表现。这 8 个噪声同时作为下一小节扰动实验的 8 个基准（对应 8 列）。
+
+\subsection{DCGAN 与 CelebA 扩展}
+DCGAN 以相同设置训练 20 个 epoch（损失见图~\ref{fig:losses} 右），一组随机噪声下生成质量明显高于全连接版本，定量与可视化对比见第~\ref{sec:cmp}~节。为检验框架可扩展性，我们另在 \textbf{CelebA}（202{,}599 张人脸，$64\times64$ RGB）上训练 5 个 epoch 的加深版 DCGAN（5 层卷积/转置卷积），生成的人脸已能呈现大致的五官布局与肤色光影（图~\ref{fig:celeba}；5 epoch 仍偏粗糙、局部有扭曲），说明同一套对抗训练框架可迁移到更高分辨率的彩色图像。
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=0.95\textwidth]{fc_8samples.png}
-  \caption{FC-GAN：自定义 8 个随机噪声的生成结果}
-  \label{fig:fc8}
-\end{figure}
-
-\subsection{潜变量扰动实验（$15\times8$）}
-从 100 维噪声中挑选第 $\{5,\,25,\,45,\,65,\,85\}$ 共 5 个维度，每个维度依次取 $\{-2.5,\ 0,\ +2.5\}$ 三档（其余 99 维保持不变），对 8 个基准噪声各生成一张，得到图~\ref{fig:trav} 的 $15\times8$ 网格：每 3 行为一组、对应一个维度，组内从上到下取值递增；每列对应一个固定的基准噪声。
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.58\textwidth]{fc_traversal.png}
-  \caption{潜变量扰动 $15\times8$（行 $=$ 5 维 $\times$ 3 档取值；列 $=$ 8 个基准噪声）}
-  \label{fig:trav}
-\end{figure}
-
-逐维观察可以总结出以下现象（成因解释见第~\ref{sec:insight} 节）：
-\begin{itemize}
-  \item \textbf{单一维度的改变引起整张图的"整体渐变"}，而不是某个孤立的语义属性（如只改袖长）。同一列内，调整一个维度时衣物的明暗、轮廓宽窄、纹理分布同时连续变化；
-  \item \textbf{多数情况下类别保持不变}：基准噪声决定了生成"哪一类"衣物（是裤子的列始终是裤子），单维扰动主要在该类别内部做形变；但在少数（维度，列）组合上，$\pm2.5$ 的大幅取值会把样本推过类别边界，出现鞋$\leftrightarrow$靴、上衣轮廓互相过渡的现象；
-  \item \textbf{取值幅度决定变化强度}：取 0 档时图像最接近"平均"形态，$\pm2.5$ 两端变化最剧烈、且常伴随噪点增多；
-  \item \textbf{不同维度的作用方向不同}：有的维度主要影响整体亮度与对比度，有的主要影响衣物的宽窄与底部形状；同一维度对不同基准噪声（不同列）的影响也不完全一致。
-\end{itemize}
-
-\subsection{加分项：DCGAN 的训练与生成结果}
-DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:dcloss}；用与图~\ref{fig:fc8} 相同的 8 个自定义噪声生成的结果见图~\ref{fig:dc8}，衣物边缘锐利、明暗过渡自然，质量明显高于全连接版本。
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.62\textwidth]{dc_loss.png}
-  \caption{DCGAN 训练损失曲线（20 epoch）}
-  \label{fig:dcloss}
-\end{figure}
-
-\begin{figure}[H]
-  \centering
-  \includegraphics[width=0.95\textwidth]{dc_8samples.png}
-  \caption{DCGAN：同样 8 个随机噪声的生成结果}
-  \label{fig:dc8}
-\end{figure}
-
-\subsection{扩展实验：CelebA 人脸上的 DCGAN}
-为进一步检验 DCGAN 在大规模彩色图像上的能力，我们完整运行了 PyTorch 官方 DCGAN 教程：在 \textbf{CelebA} 数据集（202{,}599 张人脸，对齐裁剪到 $64\times64$ RGB）上训练 5 个 epoch（batch 128，Adam $lr=2\times10^{-4}$、$\beta_1=0.5$，网络加深为 5 层卷积/转置卷积）。训练末期 $D(x)\approx0.78$、$D(G(z))\approx0.13$，损失曲线与真假对比见图~\ref{fig:celeba}。生成的人脸已具备完整的五官布局、肤色光影和发型轮廓，部分样本接近以假乱真，但仍可见局部扭曲——对 20 万张图而言 5 个 epoch 尚未充分收敛。该实验说明同一套对抗训练框架可以无缝扩展到更高分辨率的彩色图像。
-
-\begin{figure}[H]
-  \centering
-  \subfigure[训练损失曲线]{\includegraphics[width=0.55\textwidth]{celeba_loss.png}}
-  \subfigure[真实人脸（左）与生成人脸（右）]{\includegraphics[width=0.42\textwidth]{celeba_real_fake.png}}
-  \caption{CelebA 上的 DCGAN：损失曲线与真假样本对比（5 epoch）}
+  \includegraphics[width=0.62\textwidth]{celeba_real_fake.png}
+  \caption{CelebA 上 DCGAN 的真实人脸（左）与生成人脸（右），5 epoch。}
   \label{fig:celeba}
 \end{figure}
 
-\section{对比分析}
+\section{分析与讨论}
+\label{sec:cmp}
 表~\ref{tab:cmp} 汇总全连接 GAN 与 DCGAN 的最终指标，图~\ref{fig:cmp} 用同一组 16 个噪声直观对比二者的生成质量。
 
 \begin{table}[H]
@@ -288,7 +252,7 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
 
 \begin{figure}[H]
   \centering
-  \includegraphics[width=\textwidth]{exp4_quality.png}
+  \includegraphics[width=0.9\textwidth]{exp4_quality.png}
   \caption{生成质量对比。上：真实图 / FC-GAN / DCGAN（FC 与 DC 用同一组 16 个噪声）；下：同一噪声的中心局部放大——FC-GAN 边缘颗粒噪点明显，DCGAN 锐利平滑。}
   \label{fig:cmp}
 \end{figure}
@@ -304,12 +268,21 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
   \label{fig:featmaps}
 \end{figure}
 
-\section{实验心得（重点）：随机数调整对生成结果的影响}
-\label{sec:insight}
+\subsection{随机数调整对生成结果的影响}
+
+固定随机种子 123 采样 8 个 100 维标准正态噪声，生成结果见图~\ref{fig:trav}(a)：可辨认出包、裤子、套衫、鞋等类别，整体轮廓正确但边缘有颗粒噪点（全连接缺乏空间归纳偏置的典型表现）。以这 8 个噪声为基准（对应 8 列），从 100 维中挑选第 $\{5,25,45,65,85\}$ 共 5 个维度、每维取 $\{-2.5,0,+2.5\}$ 三档（其余 99 维不变），得到图~\ref{fig:trav}(b) 的 $15\times8$ 扰动网格（每 3 行一组对应一个维度）。逐维观察可归纳出三点现象（成因见下文）：单维扰动引起整张图的\textbf{整体渐变}而非孤立属性变化；基准噪声决定类别、单维扰动多在类内形变，仅在 $\pm2.5$ 时偶尔把样本推过类别边界（鞋$\leftrightarrow$靴过渡）；幅度越大变化越剧烈、噪点越多，不同维度作用方向也各不相同。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.56\textwidth]{fc_traversal_full.png}
+  \caption{(a) 8 个自定义噪声样本；(b) 以同样 8 个噪声为列的 $15\times8$ 潜变量扰动（每 3 行一组对应一个维度，组内取值 $-2.5/0/+2.5$）。}
+  \label{fig:trav}
+\end{figure}
+
 结合 $15\times8$ 扰动实验，对"调整随机数如何影响生成结果"总结如下：
 \begin{itemize}
-  \item \textbf{噪声 $\bm{z}$ 是生成图像唯一的信息来源，其整体位置决定"生成什么"}。生成器学到的是从 100 维标准正态分布到图像流形的连续映射 $G:\mathbb{R}^{100}\rightarrow\mathbb{R}^{28\times28}$。8 个基准噪声落在流形的不同区域，因此分别对应包、裤子、套衫、鞋等不同类别——"类别"这一最主要的语义由 $\bm{z}$ 的整体位置决定，而非某一维单独决定。
-  \item \textbf{普通 GAN 的潜空间是"纠缠"的：单个维度不对应单个语义属性}。实验中调整任何一维，都观察到亮度、形状、纹理的\textbf{联动渐变}，找不到一个"只控制袖长"或"只控制明暗"的维度。这是因为标准 GAN 的训练目标只要求生成分布逼近数据分布，对潜空间的组织方式没有任何约束，各语义因子自然地以混合的方式分布在所有维度上（这正是 InfoGAN、StyleGAN 等后续工作引入解耦约束的动机）。
+  \item \textbf{噪声 $\bm{z}$ 是生成图像唯一的信息来源，其整体位置决定生成什么}。生成器学到的是从 100 维标准正态分布到图像流形的连续映射 $G:\mathbb{R}^{100}\rightarrow\mathbb{R}^{28\times28}$。8 个基准噪声落在流形的不同区域，因此分别对应包、裤子、套衫、鞋等不同类别——"类别"这一最主要的语义由 $\bm{z}$ 的整体位置决定，而非某一维单独决定。
+  \item \textbf{普通 GAN 的潜空间是纠缠的：单个维度不对应单个语义属性}。实验中调整任何一维，都观察到亮度、形状、纹理的\textbf{联动渐变}，找不到一个只控制袖长或只控制明暗的维度。这是因为标准 GAN 的训练目标只要求生成分布逼近数据分布，对潜空间的组织方式没有任何约束，各语义因子自然地以混合的方式分布在所有维度上（这正是 InfoGAN、StyleGAN 等后续工作引入解耦约束的动机）。
   \item \textbf{$G$ 是连续映射，因此扰动带来的是平滑过渡}。取值从 $-2.5$ 经 0 到 $+2.5$，图像呈连续形变而非跳变；只有当扰动把 $\bm{z}$ 推过两个类别在潜空间中的边界时，才会看到鞋$\leftrightarrow$靴这类离散的类别切换，且切换附近往往出现"两类之间"的模糊形态。
   \item \textbf{扰动幅度与生成质量的关系印证了训练分布的作用}。$|z_d|\leq 1$ 附近（标准正态的高密度区）生成质量最好；取到 $\pm2.5$ 时图像变化剧烈且噪点增多，因为训练时几乎采不到这些低密度区域的样本，生成器在那里的映射没有得到充分学习。
   \item \textbf{同一维度对不同基准噪声的影响不同}。这说明 $G$ 学到的映射是高度非线性的：某一维的"语义方向"依赖于 $\bm{z}$ 所处的局部邻域，在流形的不同区域，同一坐标轴方向对应不同的图像变化。
@@ -324,13 +297,13 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
   \label{fig:noise}
 \end{figure}
 
-此外，本实验对 GAN 的训练动态也有直观体会：判别器输出 $D(x)$ 与 $D(G(z))$ 从两端向 0.5 靠拢、损失曲线呈拉锯而非单调下降，是对抗训练健康进行的标志；而 DCGAN 与 FC-GAN 损失数值接近、视觉质量却差距明显，提醒我们\textbf{对抗损失不能直接当作生成质量的度量}，结构先验（卷积）对生成图像质量起着决定性作用。
+此外，本实验对 GAN 的训练动态也有直观体会：判别器输出 $D(x)$、$D(G(z))$ 最终都在 0.5 两侧（DCGAN 尤其呈清晰的双向收敛）、损失曲线呈拉锯而非单调下降，是对抗训练健康进行的标志；而 DCGAN 与 FC-GAN 损失数值接近、视觉质量却差距明显，提醒我们\textbf{对抗损失不能直接当作生成质量的度量}，结构先验（卷积）对生成图像质量起着决定性作用。
 
-\section{GAN 的模式崩溃问题与对策}
+\subsection{GAN 的模式崩溃问题}
 \label{sec:collapse}
-\textbf{什么是模式崩溃.} 模式崩溃（mode collapse）指生成器只学会产出少数几种样本、覆盖不了真实数据的全部模态。其根源在于 GAN 的极小极大博弈：生成器的目标只是“骗过\textbf{当前}判别器”，一旦它找到某几个能稳定骗过 $D$ 的输出，就会把大量不同的噪声 $\bm{z}$ 都映射到这几个输出上，从而丢失多样性；当 $D$ 与 $G$ 的更新失衡（如 $D$ 过弱、学习率不当）或缺乏稳定化手段时尤其容易发生。
+在GAN对抗生成时常会遇到模式崩溃问题，模式崩溃（mode collapse）指生成器只学会产出少数几种样本、覆盖不了真实数据的全部模态。其根源在于 GAN 的极小极大博弈：生成器的目标只是“骗过\textbf{当前}判别器”，一旦它找到某几个能稳定骗过 $D$ 的输出，就会把大量不同的噪声 $\bm{z}$ 都映射到这几个输出上，从而丢失多样性；当 $D$ 与 $G$ 的更新失衡（如 $D$ 过弱、学习率不当）或缺乏稳定化手段时尤其容易发生。
 
-\textbf{实验演示.} 为直观展示，我们在相同数据上训练两个全连接 GAN：一个采用\textbf{健康设置}（生成器带 BatchNorm、$G/D$ 学习率平衡、$1{:}1$ 更新），另一个\textbf{故意制造失衡}（去掉生成器 BatchNorm、判别器学习率调低且每步多更新生成器）。训练后各采样 2000 张，用一个在 FashionMNIST 上训练的小型 CNN 分类器统计生成样本落入 10 个类别的分布（图~\ref{fig:collapse}）。结果非常清晰：健康模型的生成样本\textbf{覆盖全部 10 类}（类别分布熵 $2.16$，接近均匀上限 $\ln 10\approx2.30$）；崩溃模型则\textbf{几乎只生成 Sandal 与 Shirt 两类}（熵骤降到 $0.68$），其余 8 类几乎从不出现——这正是模式崩溃的典型表现，且生成质量也随之劣化。
+为直观展示，我们在相同数据上训练两个全连接 GAN：一个采用\textbf{健康设置}（生成器带 BatchNorm、$G/D$ 学习率平衡、$1{:}1$ 更新），另一个去掉生成器 BatchNorm、判别器学习率调低且每步多更新生成器故意制造失衡。训练后各采样 2000 张，用一个在 FashionMNIST 上训练的小型 CNN 分类器统计生成样本落入 10 个类别的分布（图~\ref{fig:collapse}）。结果非常清晰：健康模型的生成样本\textbf{覆盖全部 10 类}（类别分布熵 $2.16$，接近均匀上限 $\ln 10\approx2.30$）；崩溃模型则\textbf{几乎只生成 Sandal 与 Shirt 两类}（熵骤降到 $0.68$），其余 8 类几乎从不出现——这正是模式崩溃的典型表现，且生成质量也随之劣化。
 
 \begin{figure}[H]
   \centering
@@ -339,10 +312,10 @@ DCGAN 以完全相同的设置训练 20 个 epoch，损失曲线见图~\ref{fig:
   \label{fig:collapse}
 \end{figure}
 
-\textbf{常见对策.} 缓解模式崩溃的主要思路包括：(1) \textbf{改进损失/距离度量}，如 WGAN、WGAN-GP 以 Wasserstein 距离提供更平滑、不易饱和的梯度；(2) \textbf{让判别器“看到”批内多样性}，如 minibatch discrimination、feature matching，使 $D$ 能惩罚“整批雷同”；(3) \textbf{稳定化训练技巧}，如谱归一化（spectral norm）、双时间尺度更新（TTUR）、单边标签平滑、给 $D$ 输入加噪；(4) \textbf{结构与更新平衡}，保持 $G/D$ 容量与更新频率匹配、生成器使用 BatchNorm。本实验中“健康设置”正是综合了平衡更新与 BatchNorm，因而全程未出现崩溃（见 §\ref{sec:insight} 起始对 $D(x),D(G(z))$ 向 $0.5$ 收敛的分析）。
+缓解模式崩溃的主要思路包括：(1) \textbf{改进损失/距离度量}，如 WGAN、WGAN-GP 以 Wasserstein 距离提供更平滑、不易饱和的梯度；(2) \textbf{让判别器“看到”批内多样性}，如 minibatch discrimination、feature matching，使 $D$ 能惩罚“整批雷同”；(3) \textbf{稳定化训练技巧}，如谱归一化（spectral norm）、双时间尺度更新（TTUR）、单边标签平滑、给 $D$ 输入加噪；(4) \textbf{结构与更新平衡}，保持 $G/D$ 容量与更新频率匹配、生成器使用 BatchNorm。
 
 \section{结论}
-本实验在 FashionMNIST 上实现并训练了全连接 GAN 与卷积 DCGAN。全连接 GAN 经 20 个 epoch 训练后能生成类别可辨的服饰图像，判别器输出向 0.5 收敛表明对抗博弈接近均衡；$15\times8$ 潜变量扰动实验表明：噪声的整体位置决定生成类别，单维扰动引起图像的整体平滑渐变，幅度越大变化越剧烈，且普通 GAN 的潜空间语义高度纠缠、单维不对应可解释的独立属性。加分项 DCGAN 凭借卷积的空间归纳偏置，在损失数值相近的情况下生成质量显著优于全连接实现，其中间特征图清晰展现了“由粗到细、逐级上采样”的合成过程；扩展到 CelebA 人脸数据集后，同一框架也能生成具备完整五官结构的 $64\times64$ 彩色人脸。我们还专门设计对照实验演示了\textbf{模式崩溃}：失衡训练下生成类别从 10 类塌缩到 2 类（熵 $2.16\!\to\!0.68$），并讨论了 WGAN-GP、minibatch discrimination、谱归一化等对策。实验完整验证了 GAN 的对抗训练原理，并直观展示了结构先验、潜空间性质与训练稳定性对生成模型的影响。
+本次实验我们在 FashionMNIST 上实现并对比了全连接 GAN 与卷积 DCGAN，并围绕随机数对生成的影响和模式崩溃两个重点展开探究与讨论。主要结论有三：其一，两套模型的 $D(x)$、$D(G(z))$ 最终都落在 0.5 两侧（DCGAN 双向收敛尤为明显），对抗博弈健康，但损失数值相近、视觉质量却差距明显，说明\textbf{对抗损失不能直接当作生成质量的度量}，卷积的空间归纳偏置更可能是 DCGAN 质量更优的原因。其二，噪声 $\bm{z}$ 是生成的唯一信息来源：其整体位置决定生成类别，单维扰动引起整体的平滑渐变而非独立属性变化，普通 GAN 的潜空间高度\textbf{纠缠}，插值与截断实验进一步印证了 $G$ 是连续映射、且高密度区生成质量更好。其三，通过失衡训练复现了\textbf{模式崩溃}，并讨论了 WGAN-GP、minibatch discrimination、谱归一化等对策。
 
 \begin{thebibliography}{9}
   \bibitem{gan} I.~Goodfellow, J.~Pouget-Abadie, M.~Mirza, et al. Generative Adversarial Nets. \textit{NeurIPS}, 2014.
